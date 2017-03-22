@@ -256,12 +256,13 @@ def transform_pings(pings):
 
 def transform_stacks(results):
     memory_map_dict = {}
-    for date, threads in pings.iteritems():
-        for signature, data in threads.iteritems():
-            for stack_info, stats in data.stacks:
-                pseudo, memory_map, stack = stack_info
-                if memory_map not in memory_map_dict:
-                    memory_map_dict[memory_map] = [stack]
+    for date, threads in results.iteritems():
+        for thread_name, signatures in threads.iteritems():
+            for signature, data in signatures.iteritems():
+                for stack_info, stats in data['stacks']:
+                    pseudo, memory_map, stack = stack_info
+                    if memory_map is not None and memory_map not in memory_map_dict:
+                        memory_map_dict[memory_map] = [stack]
 
     stack_dict = {};
     for memory_map, stacks in memory_map_dict.iteritems():
@@ -271,17 +272,25 @@ def transform_stacks(results):
             'stacks': stacks
         }
 
-        response = requests.post(snappy_url, data=json.dumps(payload))
+        jsonDump = json.dumps(payload)
+        response = requests.post(snappy_url, data=jsonDump)
 
-        for native, symbolicated in zip(stacks, response['symbolicatedStacks']):
-            stack_dict[(memory_map, native)] = symbolicated
+        if response.status_code == 200:
+            responseJson = response.json()
 
-    for date, threads in pings.iteritems():
-        for signature, data in threads.iteritems():
-            data.stacks = [
-                stack_dict[memory_map, stack]
-                for (pseudo, memory_map, stack), stats in data.stacks
-            ]
+            for native, symbolicated in zip(stacks, responseJson['symbolicatedStacks']):
+                stack_dict[(memory_map, native)] = symbolicated
+        else:
+            print jsonDump
+            print response.text
+
+    for date, threads in results.iteritems():
+        for thread_name, signatures in threads.iteritems():
+            for signature, data in signatures.iteritems():
+                data['stacks'] = [
+                    (pseudo, stack_dict.get(memory_map, stack))
+                    for (pseudo, memory_map, stack), stats in data.stacks
+                ]
 
 def write_file(name, stuff):
     filename = "./output/%s-%s.json" % (name, end_date_str)
