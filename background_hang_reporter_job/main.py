@@ -1,7 +1,7 @@
 import os
 import ujson as json
 import pandas as pd
-import ujson as json
+import requests
 from datetime import datetime, timedelta
 
 from moztelemetry import get_pings_properties
@@ -10,6 +10,7 @@ from moztelemetry.dataset import Dataset
 use_s3 = False
 days_to_aggregate = 3
 sample_size = 0.01
+snappy_url = "http://snappy2-zero.herokuapp.com"
 
 def get_data(sc):
     start_date = (datetime.today() - timedelta(days=days_to_aggregate))
@@ -100,7 +101,7 @@ def map_to_hang_data(hang):
         stack_tuple = (
             tuple(hang['hang']['stack']),
             tupleize(hang['hang']['nativeStack']['memoryMap']),
-            tupleize(hang['hang']['nativeStack']['stacks']),
+            tupleize(hang['hang']['nativeStack']['stacks'][0]),
         )
         print stack_tuple
     else:
@@ -247,6 +248,35 @@ def transform_pings(pings):
 
     return scored
 
+def transform_stacks(results):
+    memory_map_dict = {}
+    for date, threads in pings.iteritems():
+        for signature, data in threads.iteritems():
+            for stack_info, stats in data.stacks:
+                pseudo, memory_map, stack = stack_info
+                if memory_map not in memory_map_dict:
+                    memory_map_dict[memory_map] = [stack]
+
+    stack_dict = {};
+    for memory_map, stacks in memory_map_dict.iteritems():
+        payload = {
+            'version': 4,
+            'memoryMap': memory_map,
+            'stacks': stacks
+        }
+
+        response = requests.post(snappy_url, data=json.dumps(payload))
+
+        for native, symbolicated in zip(stacks, response['symbolicatedStacks']):
+            stack_dict[(memory_map, native)] = symbolicated
+
+    for date, threads in pings.iteritems():
+        for signature, data in threads.iteritems():
+            data.stacks = [
+                stack_dict[memory_map, stack]
+                for (pseudo, memory_map, stack), stats in data.stacks
+            ]
+
 def write_file(name, stuff):
     filename = "./output/%s-%s.json" % (name, end_date_str)
     jsonblob = json.dumps(stuff, ensure_ascii=False)
@@ -273,5 +303,7 @@ def etl_job(sc, sqlContext):
     """This is the function that will be executed on the cluster"""
 
     results = transform_pings(get_data(sc))
+
+    transform_stacks(results)
 
     write_file('pseudostacks_by_day', results)

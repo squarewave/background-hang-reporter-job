@@ -338,15 +338,15 @@ def test_native_transform(native_rdd):
     expected = {
         'topframe1': {
             'stacks': [
-                ((('stack1', 'topframe1'), (('xul.pdb', 'native1'),), ((( 0, 11111 ),(-1, 11112)),)), {
+                ((('stack1', 'topframe1'), (('xul.pdb', 'native1'),), (( 0, 11111 ),(-1, 11112))), {
                     'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
                     'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
                 }),
-                ((('stack2', 'topframe1'), (('xul.pdb', 'native3'),), ((( 0, 33333 ),(-1, 33334)),)), {
+                ((('stack2', 'topframe1'), (('xul.pdb', 'native3'),), (( 0, 33333 ),(-1, 33334))), {
                     'hang_ms_per_hour': 537.60, # (4 * 128 + 5 * 256) / (200 / 60)
                     'hang_count_per_hour': 2.70 # (4 + 5) / (200 / 60)
                 }),
-                ((('stack2', 'topframe1'), (('xul.pdb', 'native2'),), ((( 0, 22222 ),(-1, 22223)),)), {
+                ((('stack2', 'topframe1'), (('xul.pdb', 'native2'),), (( 0, 22222 ),(-1, 22223))), {
                     'hang_ms_per_hour': 307.20, # (2 * 128 + 1 * 256) / (100 / 60)
                     'hang_count_per_hour': 1.80 # (2 + 1) / (100 / 60)
                 }),
@@ -356,7 +356,7 @@ def test_native_transform(native_rdd):
         },
         'topframe2': {
             'stacks': [
-                ((('stack3', 'topframe2'), (('xul.pdb', 'native1'),), ((( 0, 11111 ),(-1, 11112)),)), {
+                ((('stack3', 'topframe2'), (('xul.pdb', 'native1'),), (( 0, 11111 ),(-1, 11112))), {
                     'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
                     'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
                 }),
