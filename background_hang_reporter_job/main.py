@@ -42,6 +42,9 @@ def only_hangs_of_type(ping):
 
     result = []
 
+    if usage_hours == 0.0:
+        return result
+
     if ping['payload/childPayloads'] is not None:
         for payload in ping['payload/childPayloads']:
             if 'threadHangStats' not in payload:

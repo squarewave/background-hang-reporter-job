@@ -179,6 +179,10 @@ def simple_data():
             (t_1, [s_3, s_2], [(1, 3, 2), (3, 4, 5)], None)
         ]),
 
+        (windows,     b_2, 0, [
+            (t_1, [s_3, s_2], [(1, 3, 2), (3, 4, 5)], None)
+        ]), # should be excluded due to 0 usage hours
+
         (not_windows, b_2, 200, [
             (t_1, [s_3, s_2], [(7, 8, 9), (6, 7, 8)], None)
         ]), # should be ignored
@@ -210,6 +214,12 @@ def child_payloads_data():
                 (t_2, [s_3, s_2], [(3, 1, 1), (4, 2, 2)], None)
             ]
         ]),
+
+        (windows,     b_1, 0, [
+            [
+                (t_2, [s_1, s_2], [(1, 2, 3), (3, 2, 1)], None)
+            ]
+        ]), # should be excluded due to 0 usage hours
 
         (not_windows, b_2, 200, [
             [
