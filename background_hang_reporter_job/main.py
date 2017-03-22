@@ -189,7 +189,10 @@ def group_by_top_frame(stacks):
         hang_ms_per_hour = stats['hang_ms_per_hour']
         hang_count_per_hour = stats['hang_count_per_hour']
 
-        stack_top_frame = stack[0][-1]
+        if len(stack[0]) == 0:
+            stack_top_frame = 'empty_pseudo_stack'
+        else:
+            stack_top_frame = stack[0][-1]
 
         if not stack_top_frame in top_frames:
             top_frames[stack_top_frame] = {

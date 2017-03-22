@@ -121,6 +121,8 @@ b_3 = '20170316123456789'
 
 # stacks
 # --------------
+# stack 0 is a special case of an empty pseudo-stack. We want to ignore these
+s_0 = []
 s_1 = ['stack1', 'topframe1']
 # stack 2 has the same top frame as stack 1 (topframe1)
 s_2 = ['stack2', 'topframe1']
@@ -169,7 +171,7 @@ not_windows = 'linux'
 def simple_data():
     raw_data = [
         (windows,     b_1, 100, [
-            (t_1, [s_1, s_2], [(1, 2, 3), (3, 2, 1)], None),
+            (t_1, [s_1, s_2, s_0], [(1, 2, 3), (3, 2, 1), (0, 1, 0)], None),
             (t_4, [s_1, s_2], [(1, 2, 3), (3, 2, 1)], None)
         ]), # second thread (t_4) should be in a different thread
 
@@ -288,7 +290,17 @@ def test_simple_transform(simple_rdd):
             ],
             'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
             'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
-        }
+        },
+        'empty_pseudo_stack': {
+            'stacks': [
+                (((), None, None), {
+                    'hang_ms_per_hour': 76.80, # (1 * 128) / (100 / 60)
+                    'hang_count_per_hour': 0.6 # (1) / (100 / 60)
+                }),
+            ],
+            'hang_ms_per_hour': 76.80, # (1 * 128) / (100 / 60)
+            'hang_count_per_hour': 0.6 # (1) / (100 / 60)
+        },
     }
 
     assert_deep_equality(actual, expected)
