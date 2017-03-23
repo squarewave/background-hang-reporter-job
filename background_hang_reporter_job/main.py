@@ -1,7 +1,11 @@
 import os
 import ujson as json
 import pandas as pd
-import requests
+import urllib
+import urllib2
+import contextlib
+import gzip
+from StringIO import StringIO
 from sets import Set
 from datetime import datetime, timedelta
 
@@ -12,6 +16,10 @@ use_s3 = False
 days_to_aggregate = 3
 sample_size = 0.01
 snappy_url = "http://snappy2-zero.herokuapp.com"
+symbol_server_url = "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+
+start_date_str = ""
+end_date_str = ""
 
 def get_data(sc):
     start_date = (datetime.today() - timedelta(days=days_to_aggregate))
@@ -107,7 +115,6 @@ def map_to_hang_data(hang):
             tupleize(hang['hang']['nativeStack']['memoryMap']),
             tupleize(hang['hang']['nativeStack']['stacks'][0]),
         )
-        print stack_tuple
     else:
         stack_tuple = (
             tuple(hang['hang']['stack']),
@@ -271,57 +278,150 @@ def enumerate_stacks(results):
         for stack_data in data['stacks']:
             yield stack_data
 
-def build_symbolicator_payload(results):
+def get_stacks_by_module(results):
     breakpad_dict = {}
     for stack_info, stats in enumerate_stacks(results):
         pseudo, memory_map, stack = stack_info
         if memory_map is not None:
             for i, (module_name, breakpad_id) in enumerate(memory_map):
                 if breakpad_id not in breakpad_dict:
-                    breakpad_dict[breakpad_id] = (module_name, Set())
+                    breakpad_dict[module_name, breakpad_id] = Set()
                 for stack_module_index, offset in stack:
                     if stack_module_index == i:
-                        breakpad_dict[breakpad_id][1].add(offset)
+                        breakpad_dict[module_name, breakpad_id].add(offset)
 
-    memory_map = []
-    stacks = []
-    keys = []
+    return breakpad_dict
 
-    for i, (breakpad_id, (name, offsets)) in enumerate(breakpad_dict.iteritems()):
-        memory_map.append([name, breakpad_id])
-        stacks = stacks + [[[i, offset]] for offset in offsets]
-        keys = keys + [(breakpad_id, offset) for offset in offsets]
+def make_sym_map(data):
+    public_symbols = {}
+    func_symbols = {}
 
-    return keys, {
-        'version': 4,
-        'memoryMap': memory_map,
-        'stacks': stacks
-    }
+    for line in data.splitlines():
+        if line.startswith("PUBLIC "):
+            line = line.rstrip()
+            fields = line.split(" ", 3)
+            if len(fields) < 4:
+                continue
+            address = int(fields[1], 16)
+            symbol = fields[3]
+            public_symbols[address] = symbol
+        elif line.startswith("FUNC "):
+            line = line.rstrip()
+            fields = line.split(" ", 4)
+            if len(fields) < 5:
+                continue
+            address = int(fields[1], 16)
+            symbol = fields[4]
+            func_symbols[address] = symbol
+    # Prioritize PUBLIC symbols over FUNC ones
+    sym_map = func_symbols
+    sym_map.update(public_symbols)
 
-def symbolicate_stacks(results):
-    keys, payload = build_symbolicator_payload(results)
+    return sorted(sym_map), sym_map
 
-    jsonDump = json.dumps(payload)
-    response = requests.post(snappy_url, data=jsonDump)
+def get_file_url(module):
+    lib_name, breakpad_id = module
+    if lib_name.endswith(".pdb"):
+        file_name = lib_name[:-4] + ".sym"
+    else:
+        file_name = lib_name + ".sym"
 
-    responseJson = response.json()
+    return symbol_server_url + "/".join([
+        urllib.quote_plus(lib_name),
+        urllib.quote_plus(breakpad_id),
+        urllib.quote_plus(file_name)
+    ])
 
-    breakpad_dict = {}
-    for (breakpad_id, offset), symbolicated in zip(keys, responseJson['symbolicatedStacks']):
-        breakpad_dict[breakpad_id,offset] = symbolicated
+def get_key(val, sorted_keys):
+    if len(sorted_keys) == 0:
+        return None
 
+    # simple binary search for biggest key less than val
+    search_range = (0, len(sorted_keys))
+
+    while True:
+        index = (search_range[0] + search_range[1]) / 2
+        if index + 1 == len(sorted_keys):
+            return sorted_keys[index]
+        if sorted_keys[index] <= val and sorted_keys[index + 1] > val:
+            return sorted_keys[index]
+        elif sorted_keys[index] > val:
+            search_range = (search_range[0], index)
+        else:
+            search_range = (index+1, search_range[1])
+
+def fetch_URL(url):
+    try:
+        with contextlib.closing(urllib2.urlopen(url)) as response:
+            responseCode = response.getcode()
+            if responseCode == 404:
+                return False, ""
+            if responseCode != 200:
+                return False, ""
+            return True, decode_response(response)
+    except IOError as e:
+        pass
+
+    return False, ""
+
+def decode_response(response):
+    headers = response.info()
+    content_encoding = headers.get("Content-Encoding", "").lower()
+    if content_encoding in ("gzip", "x-gzip", "deflate"):
+        with contextlib.closing(StringIO(response.read())) as data_stream:
+            try:
+                with gzip.GzipFile(fileobj=data_stream) as f:
+                    return f.read()
+            except EnvironmentError:
+                data_stream.seek(0)
+                return data_stream.read().decode('zlib')
+    return response.read()
+
+def process_modules(stacks_by_module):
+    stack_dict = {}
+
+    for module, offsets in stacks_by_module.iteritems():
+        file_url = get_file_url(module)
+
+        module_name, breakpad_id = module
+
+        success, response = fetch_URL(file_url)
+
+        if success:
+            sorted_keys, sym_map = make_sym_map(response)
+
+            for offset in offsets:
+                key = get_key(offset, sorted_keys)
+
+                symbol = sym_map.get(key)
+                if symbol is not None:
+                    stack_dict[breakpad_id, offset] = "{} (in {})".format(symbol, module_name)
+                else:
+                    stack_dict[breakpad_id, offset] = "{} (in {})".format(hex(offset), module_name)
+        else:
+            for offset in offsets:
+                stack_dict[breakpad_id, offset] = "{} (in {})".format(hex(offset), module_name)
+
+    return stack_dict
+
+def apply_processed_modules(results, stack_dict):
     for signature, data in enumerate_signatures(results):
         data_stacks = []
         for (pseudo, memory_map, stack), stats in data['stacks']:
             symbolicated = None
             if memory_map is not None:
                 symbolicated = [
-                    breakpad_dict.get((memory_map[module_index][1], offset), offset)
+                    stack_dict.get((memory_map[module_index][1], offset), offset)
                     if module_index != -1 else offset
                     for module_index, offset in stack
                 ]
             data_stacks.append(((pseudo, symbolicated), stats))
         data['stacks'] = data_stacks
+
+def symbolicate_stacks(results):
+    modules = get_stacks_by_module(results)
+    stack_dict = process_modules(modules)
+    apply_processed_modules(results, stack_dict)
 
 def write_file(name, stuff):
     filename = "./output/%s-%s.json" % (name, end_date_str)

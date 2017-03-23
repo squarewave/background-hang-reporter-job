@@ -390,30 +390,6 @@ def test_native_transform(native_rdd):
 
     assert_deep_equality(actual, expected)
 
-def test_build_symbolicator_payload(native_rdd):
-    transformed = transform_pings(native_rdd)
-
-    keys, actual = build_symbolicator_payload(transformed)
-
-    assert 'memoryMap' in actual
-    assert 'stacks' in actual
-
-    expected = {
-        "version": 4,
-        "memoryMap": [
-            ["xul.pdb", "native1"],
-            ["xul.pdb", "native2"],
-            ["xul.pdb", "native3"],
-        ],
-        "stacks": [
-            [[0, 11111]],
-            [[1, 22222]],
-            [[2, 33333]],
-        ]
-    }
-
-    assert actual == expected
-
 def test_symbolicate_stacks(native_rdd):
     transformed = transform_pings(native_rdd)
 
@@ -453,3 +429,21 @@ def test_symbolicate_stacks(native_rdd):
             'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
         }
     }
+
+def test_real_stacks():
+    real_stacks = {
+        ('firefox.pdb', 'C836665D4FCC4CE5AF302983CBD45DA62'): [39473, 7133, 28686, 23327],
+        ('ntdll.pdb', '54F631A12F8A428AAC8CD5D273638DB82'): [178225, 12345]
+    }
+
+    actual = process_modules(real_stacks)
+    expected = {
+        ('C836665D4FCC4CE5AF302983CBD45DA62', 39473): 'content_process_main(mozilla::Bootstrap *,int,char * * const) (in firefox.pdb)',
+        ('C836665D4FCC4CE5AF302983CBD45DA62', 7133): 'wmain (in firefox.pdb)',
+        ('C836665D4FCC4CE5AF302983CBD45DA62', 28686): 'wmain (in firefox.pdb)',
+        ('C836665D4FCC4CE5AF302983CBD45DA62', 23327): '__scrt_common_main_seh (in firefox.pdb)',
+        ('54F631A12F8A428AAC8CD5D273638DB82', 178225): 'RtlUserThreadStart (in ntdll.pdb)',
+        ('54F631A12F8A428AAC8CD5D273638DB82', 12345): 'RtlQueryRegistryValues (in ntdll.pdb)',
+    }
+
+    assert actual == expected
