@@ -2,6 +2,7 @@ import os
 import ujson as json
 import pandas as pd
 import requests
+from sets import Set
 from datetime import datetime, timedelta
 
 from moztelemetry import get_pings_properties
@@ -254,43 +255,73 @@ def transform_pings(pings):
 
     return scored
 
-def transform_stacks(results):
-    memory_map_dict = {}
+def enumerate_threads(results):
     for date, threads in results.iteritems():
-        for thread_name, signatures in threads.iteritems():
-            for signature, data in signatures.iteritems():
-                for stack_info, stats in data['stacks']:
-                    pseudo, memory_map, stack = stack_info
-                    if memory_map is not None and memory_map not in memory_map_dict:
-                        memory_map_dict[memory_map] = [stack]
+        for thread in threads.iteritems():
+            # TODO: is there an equivalent to JS's "yield*" in Python?
+            yield thread
 
-    stack_dict = {};
-    for memory_map, stacks in memory_map_dict.iteritems():
-        payload = {
-            'version': 4,
-            'memoryMap': memory_map,
-            'stacks': stacks
-        }
+def enumerate_signatures(results):
+    for thread_name, signatures in enumerate_threads(results):
+        for signature_data in signatures.iteritems():
+            yield signature_data
 
-        jsonDump = json.dumps(payload)
-        response = requests.post(snappy_url, data=jsonDump)
+def enumerate_stacks(results):
+    for signature, data in enumerate_signatures(results):
+        for stack_data in data['stacks']:
+            yield stack_data
 
-        if response.status_code == 200:
-            responseJson = response.json()
+def build_symbolicator_payload(results):
+    breakpad_dict = {}
+    for stack_info, stats in enumerate_stacks(results):
+        pseudo, memory_map, stack = stack_info
+        if memory_map is not None:
+            for i, (module_name, breakpad_id) in enumerate(memory_map):
+                if breakpad_id not in breakpad_dict:
+                    breakpad_dict[breakpad_id] = (module_name, Set())
+                for stack_module_index, offset in stack:
+                    if stack_module_index == i:
+                        breakpad_dict[breakpad_id][1].add(offset)
 
-            for native, symbolicated in zip(stacks, responseJson['symbolicatedStacks']):
-                stack_dict[(memory_map, native)] = symbolicated
-        else:
-            print jsonDump
-            print response.text
+    memory_map = []
+    stacks = []
+    keys = []
 
-    for date, threads in results.iteritems():
-        for thread_name, signatures in threads.iteritems():
-            for signature, data in signatures.iteritems():
-                data['stacks'] = [
-                    (pseudo, stack_dict.get(memory_map, stack))
-                    for (pseudo, memory_map, stack), stats in data.stacks
+    for i, (breakpad_id, (name, offsets)) in enumerate(breakpad_dict.iteritems()):
+        memory_map.append([name, breakpad_id])
+        stacks = stacks + [[[i, offset]] for offset in offsets]
+        keys = keys + [(breakpad_id, offset) for offset in offsets]
+
+    return keys, {
+        'version': 4,
+        'memoryMap': memory_map,
+        'stacks': stacks
+    }
+
+def symbolicate_stacks(results):
+    keys, payload = build_symbolicator_payload(results)
+
+    jsonDump = json.dumps(payload)
+    response = requests.post(snappy_url, data=jsonDump)
+
+    responseJson = response.json()
+
+    breakpad_dict = {}
+    for (breakpad_id, offset), symbolicated in zip(keys, responseJson['symbolicatedStacks']):
+        breakpad_dict[breakpad_id,offset] = symbolicated
+
+    for signature, data in enumerate_signatures(results):
+        data_stacks = []
+        for (pseudo, memory_map, stack), stats in data['stacks']:
+            symbolicated = None
+            if memory_map is not None:
+                symbolicated = [
+                    breakpad_dict.get((memory_map[module_index][1], offset), offset)
+                    if module_index != -1 else offset
+                    for module_index, offset in stack
                 ]
+            data_stacks.append(((pseudo, symbolicated), stats))
+        data['stacks'] = data_stacks
 
 def write_file(name, stuff):
     filename = "./output/%s-%s.json" % (name, end_date_str)
@@ -319,6 +350,6 @@ def etl_job(sc, sqlContext):
 
     results = transform_pings(get_data(sc))
 
-    transform_stacks(results)
+    symbolicate_stacks(results)
 
     write_file('pseudostacks_by_day', results)

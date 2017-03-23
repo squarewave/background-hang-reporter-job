@@ -389,3 +389,67 @@ def test_native_transform(native_rdd):
     }
 
     assert_deep_equality(actual, expected)
+
+def test_build_symbolicator_payload(native_rdd):
+    transformed = transform_pings(native_rdd)
+
+    keys, actual = build_symbolicator_payload(transformed)
+
+    assert 'memoryMap' in actual
+    assert 'stacks' in actual
+
+    expected = {
+        "version": 4,
+        "memoryMap": [
+            ["xul.pdb", "native1"],
+            ["xul.pdb", "native2"],
+            ["xul.pdb", "native3"],
+        ],
+        "stacks": [
+            [[0, 11111]],
+            [[1, 22222]],
+            [[2, 33333]],
+        ]
+    }
+
+    assert actual == expected
+
+def test_symbolicate_stacks(native_rdd):
+    transformed = transform_pings(native_rdd)
+
+    # NOTE: this makes an HTTP call - we could fake that, but I think it's most useful
+    # to keep the transformation as close as possible to what's actually going on
+    symbolicate_stacks(transformed)
+
+    actual = transformed['20170317']['Gecko']
+
+    expected = {
+        'topframe1': {
+            'stacks': [
+                ((('stack1', 'topframe1'), ["0x2b67 (in xul.pdb)", 11112]), {
+                    'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
+                    'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
+                }),
+                ((('stack2', 'topframe1'), [ "0x56ce (in xul.pdb)", 33334]), {
+                    'hang_ms_per_hour': 537.60, # (4 * 128 + 5 * 256) / (200 / 60)
+                    'hang_count_per_hour': 2.70 # (4 + 5) / (200 / 60)
+                }),
+                ((('stack2', 'topframe1'), ["0x56ce (in xul.pdb)", 22223]), {
+                    'hang_ms_per_hour': 307.20, # (2 * 128 + 1 * 256) / (100 / 60)
+                    'hang_count_per_hour': 1.80 # (2 + 1) / (100 / 60)
+                }),
+            ],
+            'hang_ms_per_hour': 307.20 + 537.60 + 614.40,
+            'hang_count_per_hour': 1.80 + 2.70 + 3.00,
+        },
+        'topframe2': {
+            'stacks': [
+                ((('stack3', 'topframe2'), ["0x2b67 (in xul.pdb)", 11112]), {
+                    'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
+                    'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+                }),
+            ],
+            'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
+            'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+        }
+    }
