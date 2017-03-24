@@ -393,9 +393,12 @@ def test_native_transform(native_rdd):
 def test_symbolicate_stacks(native_rdd):
     transformed = transform_pings(native_rdd)
 
+    config = {
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+    }
     # NOTE: this makes an HTTP call - we could fake that, but I think it's most useful
     # to keep the transformation as close as possible to what's actually going on
-    symbolicate_stacks(transformed)
+    symbolicate_stacks(transformed, config)
 
     actual = transformed['20170317']['Gecko']
 
@@ -436,7 +439,10 @@ def test_real_stacks():
         ('ntdll.pdb', '54F631A12F8A428AAC8CD5D273638DB82'): [178225, 12345]
     }
 
-    actual = process_modules(real_stacks)
+    config = {
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+    }
+    actual = process_modules(real_stacks, config)
     expected = {
         ('C836665D4FCC4CE5AF302983CBD45DA62', 39473): 'content_process_main(mozilla::Bootstrap *,int,char * * const) (in firefox.pdb)',
         ('C836665D4FCC4CE5AF302983CBD45DA62', 7133): 'wmain (in firefox.pdb)',

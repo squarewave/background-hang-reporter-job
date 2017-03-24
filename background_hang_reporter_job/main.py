@@ -12,17 +12,8 @@ from datetime import datetime, timedelta
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
-use_s3 = False
-days_to_aggregate = 3
-sample_size = 0.01
-snappy_url = "http://snappy2-zero.herokuapp.com"
-symbol_server_url = "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
-
-start_date_str = ""
-end_date_str = ""
-
-def get_data(sc):
-    start_date = (datetime.today() - timedelta(days=days_to_aggregate))
+def get_data(sc, config):
+    start_date = (datetime.today() - timedelta(days=config['days_to_aggregate']))
     start_date_str = start_date.strftime("%Y%m%d")
     end_date = (datetime.today() - timedelta(days=0))
     end_date_str = end_date.strftime("%Y%m%d")
@@ -32,7 +23,7 @@ def get_data(sc):
         .where(appBuildId=lambda b: (b.startswith(start_date_str) or b > start_date_str)
                                      and (b.startswith(end_date_str) or b < end_date_str))
         .where(appUpdateChannel="nightly")
-        .records(sc, sample=sample_size))
+        .records(sc, sample=config['sample_size']))
 
     properties = ["environment/system/os/name",
                   "application/buildId",
@@ -319,14 +310,14 @@ def make_sym_map(data):
 
     return sorted(sym_map), sym_map
 
-def get_file_url(module):
+def get_file_url(module, config):
     lib_name, breakpad_id = module
     if lib_name.endswith(".pdb"):
         file_name = lib_name[:-4] + ".sym"
     else:
         file_name = lib_name + ".sym"
 
-    return symbol_server_url + "/".join([
+    return config['symbol_server_url'] + "/".join([
         urllib.quote_plus(lib_name),
         urllib.quote_plus(breakpad_id),
         urllib.quote_plus(file_name)
@@ -377,11 +368,11 @@ def decode_response(response):
                 return data_stream.read().decode('zlib')
     return response.read()
 
-def process_modules(stacks_by_module):
+def process_modules(stacks_by_module, config):
     stack_dict = {}
 
     for module, offsets in stacks_by_module.iteritems():
-        file_url = get_file_url(module)
+        file_url = get_file_url(module, config)
 
         module_name, breakpad_id = module
 
@@ -418,16 +409,19 @@ def apply_processed_modules(results, stack_dict):
             data_stacks.append(((pseudo, symbolicated), stats))
         data['stacks'] = data_stacks
 
-def symbolicate_stacks(results):
+def symbolicate_stacks(results, config):
     modules = get_stacks_by_module(results)
-    stack_dict = process_modules(modules)
+    stack_dict = process_modules(modules, config)
     apply_processed_modules(results, stack_dict)
 
-def write_file(name, stuff):
+def write_file(name, stuff, config):
+    end_date = datetime.today()
+    end_date_str = end_date.strftime("%Y%m%d")
+
     filename = "./output/%s-%s.json" % (name, end_date_str)
     jsonblob = json.dumps(stuff, ensure_ascii=False)
 
-    if use_s3:
+    if config['use_s3']:
         # TODO: This was adapted from another report. I'm not actually sure
         # what the process is for dumping stuff to s3, and would appreciate
         # feedback!
@@ -445,11 +439,21 @@ def write_file(name, stuff):
         with open(filename, 'w') as f:
             f.write(jsonblob)
 
-def etl_job(sc, sqlContext):
+def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
-    results = transform_pings(get_data(sc))
+    final_config = {
+        'days_to_aggregate': 30,
+        'use_s3': True,
+        'sample_size': 1.0,
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+    }
 
-    symbolicate_stacks(results)
+    if config is not None:
+        final_config.update(config)
 
-    write_file('pseudostacks_by_day', results)
+    results = transform_pings(get_data(sc, final_config))
+
+    symbolicate_stacks(results, final_config)
+
+    write_file('pseudostacks_by_day', results, final_config)
