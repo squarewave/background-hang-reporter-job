@@ -459,4 +459,4 @@ def etl_job(sc, sqlContext, config=None):
 
     symbolicate_stacks(results, final_config)
 
-    write_file('pseudostacks_by_day', results, final_config)
+    write_file('stacks_by_day', results, final_config)
