@@ -100,7 +100,10 @@ def map_to_hang_data(hang):
     hang_sum = (hist * weights)[hist.index >= 100].sum()
     hang_count = hist[hist.index >= 100].sum()
 
-    if 'nativeStack' in hang['hang']:
+    # Observed nativeStack being a list in the wild. Not sure how - make sure it's a dict.
+    if ('nativeStack' in hang['hang']
+        and type(hang['hang']['nativeStack']) is dict
+        and len(hang['hang']['nativeStack']['stacks']) > 0):
         stack_tuple = (
             tuple(hang['hang']['stack']),
             tupleize(hang['hang']['nativeStack']['memoryMap']),
