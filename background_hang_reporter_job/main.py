@@ -2,7 +2,8 @@ import os
 import ujson as json
 import pandas as pd
 import urllib
-import urllib2
+import eventlet
+from eventlet.green import urllib2
 import contextlib
 import gzip
 from StringIO import StringIO
@@ -313,7 +314,7 @@ def make_sym_map(data):
 
     return sorted(sym_map), sym_map
 
-def get_file_url(module, config):
+def get_file_URL(module, config):
     lib_name, breakpad_id = module
     if lib_name.endswith(".pdb"):
         file_name = lib_name[:-4] + ".sym"
@@ -374,12 +375,11 @@ def decode_response(response):
 def process_modules(stacks_by_module, config):
     stack_dict = {}
 
-    for module, offsets in stacks_by_module.iteritems():
-        file_url = get_file_url(module, config)
+    file_URLs = [get_file_URL(module, config) for module, offsets in stacks_by_module.iteritems()]
+    pool = eventlet.GreenPool()
 
+    for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
         module_name, breakpad_id = module
-
-        success, response = fetch_URL(file_url)
 
         if success:
             sorted_keys, sym_map = make_sym_map(response)

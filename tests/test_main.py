@@ -453,3 +453,40 @@ def test_real_stacks():
     }
 
     assert actual == expected
+
+import time
+
+def test_fetch_URLs():
+    config = {
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+    }
+
+    module_infos = [
+        (
+            "ntdll.pdb",
+            "F0164DA71FAF4765B8F3DB4F2D7650EA2"
+        ),
+        (
+            "firefox.pdb",
+            "C836665D4FCC4CE5AF302983CBD45DA62"
+        ),
+        (
+            "ntdll.pdb",
+            "0A2571A3E36A4F909B719773CC176B032"
+        ),
+        (
+            "ntdll.pdb",
+            "54F631A12F8A428AAC8CD5D273638DB82"
+        ),
+        (
+            "kernelbase.pdb",
+            "A0DE635BD84C4850B0355973EC7F00831"
+        ),
+    ]
+
+    URLs = [get_file_URL(module, config) for module in module_infos]
+
+    pool = eventlet.GreenPool()
+
+    for result in pool.imap(fetch_URL, URLs):
+        pass

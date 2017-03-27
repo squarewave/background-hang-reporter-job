@@ -10,4 +10,7 @@ setup(name='background_hang_reporter_job',
       author_email='dothayer@mozilla.com',
       url='https://github.com/squarewave/background-hang-reporter-job',
       packages=find_packages(exclude=['tests']),
+      install_requires=[
+        'eventlet',
+      ]
 )
