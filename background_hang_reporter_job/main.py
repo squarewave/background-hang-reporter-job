@@ -82,6 +82,17 @@ def only_hangs_of_type(ping):
                     for x in thread_hang['hangs']
                 ]
 
+    if (len(result) == 0):
+        result = [{
+            'build_date': build_date,
+            'thread_name': None,
+            'usage_hours': usage_hours,
+            'hang': None
+        }]
+    else:
+        for record in result:
+            record['usage_hours'] /= len(result)
+
     return result
 
 def filter_for_hangs_of_type(pings):
@@ -94,6 +105,13 @@ def tupleize(l):
         return l
 
 def map_to_hang_data(hang):
+    if hang['hang'] is None:
+        return ((None, None, None), {
+            'hang_ms': 0,
+            'hang_count': 0,
+            'usage_hours': hang['usage_hours']
+        })
+
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
@@ -123,14 +141,16 @@ def map_to_hang_data(hang):
     # reduced on this we'll collect as a map, since there should only be
     # ~10^1 days, 10^1 threads, 10^3 stacks : 100,000 records
     return (key, {
-        'hang_ms_per_hour': hang_sum / hang['usage_hours'],
-        'hang_count_per_hour': hang_count / hang['usage_hours'],
+        'hang_ms': hang_sum,
+        'hang_count': hang_count,
+        'usage_hours': hang['usage_hours']
     })
 
 def merge_hang_data(a, b):
     return {
-        'hang_ms_per_hour': a['hang_ms_per_hour'] + b['hang_ms_per_hour'],
-        'hang_count_per_hour': a['hang_count_per_hour'] + b['hang_count_per_hour'],
+        'hang_ms': a['hang_ms'] + b['hang_ms'],
+        'hang_count': a['hang_count'] + b['hang_count'],
+        'usage_hours': a['usage_hours'] + b['usage_hours'],
     }
 
 def get_grouped_sums_and_counts(hangs):
@@ -143,8 +163,14 @@ def group_by_date(stacks):
     for key, stats in stacks.iteritems():
         stack, thread_name, build_date = key;
 
-        hang_ms_per_hour = stats['hang_ms_per_hour']
-        hang_count_per_hour = stats['hang_count_per_hour']
+        usage_hours = stats['usage_hours']
+
+        if stack is None:
+            date['usage_hours'] += usage_hours
+            continue
+
+        hang_ms = stats['hang_ms']
+        hang_count = stats['hang_count']
 
         if len(stack) == 0:
             continue
@@ -152,6 +178,7 @@ def group_by_date(stacks):
         if not build_date in dates:
             dates[build_date] = {
                 "date": build_date,
+                "usage_hours": 0.0,
                 "threads": [],
             }
 
@@ -159,9 +186,10 @@ def group_by_date(stacks):
 
         date = dates[build_date]
 
+        date['usage_hours'] += usage_hours
         date["threads"].append((new_key, {
-            'hang_ms_per_hour': hang_ms_per_hour,
-            'hang_count_per_hour': hang_count_per_hour
+            'hang_ms': hang_ms,
+            'hang_count': hang_count
         }))
 
     return dates
@@ -171,8 +199,8 @@ def group_by_thread_name(stacks):
     for key, stats in stacks:
         new_key, thread_name = key
 
-        hang_ms_per_hour = stats['hang_ms_per_hour']
-        hang_count_per_hour = stats['hang_count_per_hour']
+        hang_ms = stats['hang_ms']
+        hang_count = stats['hang_count']
 
         if not thread_name in thread_names:
             thread_names[thread_name] = {
@@ -183,17 +211,17 @@ def group_by_thread_name(stacks):
         thread_name_obj = thread_names[thread_name]
 
         thread_name_obj["hangs"].append((new_key, {
-            'hang_ms_per_hour': hang_ms_per_hour,
-            'hang_count_per_hour': hang_count_per_hour
+            'hang_ms': hang_ms,
+            'hang_count': hang_count
         }))
 
     return thread_names
 
-def group_by_top_frame(stacks):
+def group_by_top_frame(stacks, usage_hours):
     top_frames = {}
     for stack, stats in stacks:
-        hang_ms_per_hour = stats['hang_ms_per_hour']
-        hang_count_per_hour = stats['hang_count_per_hour']
+        hang_ms_per_hour = stats['hang_ms'] / usage_hours
+        hang_count_per_hour = stats['hang_count'] / usage_hours
 
         if len(stack[0]) == 0:
             stack_top_frame = 'empty_pseudo_stack'
@@ -221,29 +249,15 @@ def group_by_top_frame(stacks):
 
     return top_frames
 
-def score(grouping):
-    scored_stacks = []
-    for stack_tuple in grouping['stacks']:
-        scored_stacks.append((stack_tuple[0], {
-            'hang_ms_per_hour': stack_tuple[1]['hang_ms_per_hour'],
-            'hang_count_per_hour': stack_tuple[1]['hang_count_per_hour']
-        }))
-
-    grouping['stacks'] = scored_stacks
-    return grouping
-
-def score_all(grouped_by_top_frame):
-    return {k: score(g) for k, g in grouped_by_top_frame.iteritems()}
-
-def get_by_top_frame_by_thread(by_thread):
+def get_by_top_frame_by_thread(by_thread, usage_hours):
     return {
-        k: score_all(group_by_top_frame(g["hangs"]))
+        k: group_by_top_frame(g["hangs"], usage_hours)
         for k, g in by_thread.iteritems()
     }
 
 def get_by_thread_by_date(by_date):
     return {
-        k: get_by_top_frame_by_thread(group_by_thread_name(g["threads"]))
+        k: get_by_top_frame_by_thread(group_by_thread_name(g["threads"]), g["usage_hours"])
         for k, g in by_date.iteritems()
     }
 
@@ -253,9 +267,9 @@ def transform_pings(pings):
     hangs = filter_for_hangs_of_type(windows_pings_only)
     grouped_hangs = get_grouped_sums_and_counts(hangs)
     by_date = group_by_date(grouped_hangs)
-    scored = get_by_thread_by_date(by_date)
+    result = get_by_thread_by_date(by_date)
 
-    return scored
+    return result
 
 def enumerate_threads(results):
     for date, threads in results.iteritems():

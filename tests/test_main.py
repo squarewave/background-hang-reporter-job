@@ -280,36 +280,36 @@ def test_simple_transform(simple_rdd):
         'topframe1': {
             'stacks': [
                 ((('stack2', 'topframe1'), None, None), {
-                    'hang_ms_per_hour': 307.20 + 537.60, # (2 * 128 + 1 * 256) / (100 / 60) + (4 * 128 + 5 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.80 + 2.70 # (2 + 1) / (100 / 60) + (4 + 5) / (200 / 60)
+                    'hang_ms_per_hour': 345.60, # ((2 * 128 + 1 * 256) + (4 * 128 + 5 * 256)) / (400 / 60)
+                    'hang_count_per_hour': 1.80 # ((2 + 1) + (4 + 5)) / (400 / 60)
                 }),
                 ((('stack1', 'topframe1'), None, None), {
-                    'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
-                    'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
+                    'hang_ms_per_hour': 153.60, # (2 * 128 + 3 * 256) / (400 / 60)
+                    'hang_count_per_hour': 0.75 # (2 + 3) / (400 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 307.20 + 537.60 + 614.40,
-            'hang_count_per_hour': 1.80 + 2.70 + 3.00,
+            'hang_ms_per_hour': 345.60 + 153.60,
+            'hang_count_per_hour': 1.80 + 0.75,
         },
         'topframe2': {
             'stacks': [
                 ((('stack3', 'topframe2'), None, None), {
-                    'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+                    'hang_ms_per_hour': 134.40, # (3 * 128 + 2 * 256) / (400 / 60)
+                    'hang_count_per_hour': 0.75 # (3 + 2) / (400 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-            'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+            'hang_ms_per_hour': 134.40, # (3 * 128 + 2 * 256) / (400 / 60)
+            'hang_count_per_hour': 0.75 # (3 + 2) / (400 / 60)
         },
         'empty_pseudo_stack': {
             'stacks': [
                 (((), None, None), {
-                    'hang_ms_per_hour': 76.80, # (1 * 128) / (100 / 60)
-                    'hang_count_per_hour': 0.6 # (1) / (100 / 60)
+                    'hang_ms_per_hour': 19.20, # (1 * 128) / (400 / 60)
+                    'hang_count_per_hour': 0.15 # (1) / (400 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 76.80, # (1 * 128) / (100 / 60)
-            'hang_count_per_hour': 0.6 # (1) / (100 / 60)
+            'hang_ms_per_hour': 19.20, # (1 * 128) / (400 / 60)
+            'hang_count_per_hour': 0.15 # (1) / (400 / 60)
         },
     }
 
@@ -328,26 +328,26 @@ def test_child_transform(child_rdd):
         'topframe1': {
             'stacks': [
                 ((('stack2', 'topframe1'), None, None), {
-                    'hang_ms_per_hour': 307.20 + 537.60, # (2 * 128 + 1 * 256) / (100 / 60) + (4 * 128 + 5 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.80 + 2.70 # (2 + 1) / (100 / 60) + (4 + 5) / (200 / 60)
+                    'hang_ms_per_hour': 345.60, # ((2 * 128 + 1 * 256) + (4 * 128 + 5 * 256)) / (400 / 60)
+                    'hang_count_per_hour': 1.80 # ((2 + 1) + (4 + 5)) / (400 / 60)
                 }),
                 ((('stack1', 'topframe1'), None, None), {
-                    'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
-                    'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
+                    'hang_ms_per_hour': 153.60, # (2 * 128 + 3 * 256) / (400 / 60)
+                    'hang_count_per_hour': 0.75 # (2 + 3) / (400 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 307.20 + 537.60 + 614.40,
-            'hang_count_per_hour': 1.80 + 2.70 + 3.00,
+            'hang_ms_per_hour': 345.60 + 153.60,
+            'hang_count_per_hour': 1.80 + 0.75,
         },
         'topframe2': {
             'stacks': [
                 ((('stack3', 'topframe2'), None, None), {
-                    'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+                    'hang_ms_per_hour': 134.40, # (3 * 128 + 2 * 256) / (400 / 60)
+                    'hang_count_per_hour': 0.75 # (3 + 2) / (400 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-            'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+            'hang_ms_per_hour': 134.40, # (3 * 128 + 2 * 256) / (400 / 60)
+            'hang_count_per_hour': 0.75 # (3 + 2) / (400 / 60)
         }
     }
 
@@ -360,31 +360,31 @@ def test_native_transform(native_rdd):
     expected = {
         'topframe1': {
             'stacks': [
-                ((('stack1', 'topframe1'), (('xul.pdb', 'native1'),), (( 0, 11111 ),(-1, 11112))), {
-                    'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
-                    'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
-                }),
                 ((('stack2', 'topframe1'), (('xul.pdb', 'native3'),), (( 0, 33333 ),(-1, 33334))), {
-                    'hang_ms_per_hour': 537.60, # (4 * 128 + 5 * 256) / (200 / 60)
-                    'hang_count_per_hour': 2.70 # (4 + 5) / (200 / 60)
+                    'hang_ms_per_hour': 358.40, # (4 * 128 + 5 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.80 # (4 + 5) / (300 / 60)
+                }),
+                ((('stack1', 'topframe1'), (('xul.pdb', 'native1'),), (( 0, 11111 ),(-1, 11112))), {
+                    'hang_ms_per_hour': 204.80, # (2 * 128 + 3 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.00 # (2 + 3) / (300 / 60)
                 }),
                 ((('stack2', 'topframe1'), (('xul.pdb', 'native2'),), (( 0, 22222 ),(-1, 22223))), {
-                    'hang_ms_per_hour': 307.20, # (2 * 128 + 1 * 256) / (100 / 60)
-                    'hang_count_per_hour': 1.80 # (2 + 1) / (100 / 60)
+                    'hang_ms_per_hour': 102.40, # (2 * 128 + 1 * 256) / (300 / 60)
+                    'hang_count_per_hour': 0.60 # (2 + 1) / (300 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 307.20 + 537.60 + 614.40,
-            'hang_count_per_hour': 1.80 + 2.70 + 3.00,
+            'hang_ms_per_hour': 358.40 + 204.80 + 102.40,
+            'hang_count_per_hour': 1.80 + 1.00 + 0.60,
         },
         'topframe2': {
             'stacks': [
                 ((('stack3', 'topframe2'), (('xul.pdb', 'native1'),), (( 0, 11111 ),(-1, 11112))), {
-                    'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+                    'hang_ms_per_hour': 179.20, # (3 * 128 + 2 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.00 # (3 + 2) / (300 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-            'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+            'hang_ms_per_hour': 179.20, # (3 * 128 + 2 * 256) / (300 / 60)
+            'hang_count_per_hour': 1.00 # (3 + 2) / (300 / 60)
         }
     }
 
@@ -405,33 +405,35 @@ def test_symbolicate_stacks(native_rdd):
     expected = {
         'topframe1': {
             'stacks': [
-                ((('stack1', 'topframe1'), ["0x2b67 (in xul.pdb)", 11112]), {
-                    'hang_ms_per_hour': 614.40, # (2 * 128 + 3 * 256) / (100 / 60)
-                    'hang_count_per_hour': 3.00 # (2 + 3) / (100 / 60)
+                ((('stack2', 'topframe1'), [ "0x8235 (in xul.pdb)", 33334]), {
+                    'hang_ms_per_hour': 358.40, # (4 * 128 + 5 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.80 # (4 + 5) / (300 / 60)
                 }),
-                ((('stack2', 'topframe1'), [ "0x56ce (in xul.pdb)", 33334]), {
-                    'hang_ms_per_hour': 537.60, # (4 * 128 + 5 * 256) / (200 / 60)
-                    'hang_count_per_hour': 2.70 # (4 + 5) / (200 / 60)
+                ((('stack1', 'topframe1'), ["0x2b67 (in xul.pdb)", 11112]), {
+                    'hang_ms_per_hour': 204.80, # (2 * 128 + 3 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.00 # (2 + 3) / (300 / 60)
                 }),
                 ((('stack2', 'topframe1'), ["0x56ce (in xul.pdb)", 22223]), {
-                    'hang_ms_per_hour': 307.20, # (2 * 128 + 1 * 256) / (100 / 60)
-                    'hang_count_per_hour': 1.80 # (2 + 1) / (100 / 60)
+                    'hang_ms_per_hour': 102.40, # (2 * 128 + 1 * 256) / (300 / 60)
+                    'hang_count_per_hour': 0.60 # (2 + 1) / (300 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 307.20 + 537.60 + 614.40,
-            'hang_count_per_hour': 1.80 + 2.70 + 3.00,
+            'hang_ms_per_hour': 358.40 + 204.80 + 102.40,
+            'hang_count_per_hour': 1.80 + 1.00 + 0.60,
         },
         'topframe2': {
             'stacks': [
                 ((('stack3', 'topframe2'), ["0x2b67 (in xul.pdb)", 11112]), {
-                    'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-                    'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+                    'hang_ms_per_hour': 179.20, # (3 * 128 + 2 * 256) / (300 / 60)
+                    'hang_count_per_hour': 1.00 # (3 + 2) / (300 / 60)
                 }),
             ],
-            'hang_ms_per_hour': 268.80, # (3 * 128 + 2 * 256) / (200 / 60)
-            'hang_count_per_hour': 1.50 # (3 + 2) / (200 / 60)
+            'hang_ms_per_hour': 179.20, # (3 * 128 + 2 * 256) / (300 / 60)
+            'hang_count_per_hour': 1.00 # (3 + 2) / (300 / 60)
         }
     }
+
+    assert_deep_equality(actual, expected)
 
 def test_real_stacks():
     real_stacks = {
