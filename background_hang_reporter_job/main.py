@@ -218,6 +218,10 @@ def group_by_top_frame(stacks, usage_hours):
         top_frame["hang_ms_per_hour"] += hang_ms_per_hour
         top_frame["hang_count_per_hour"] += hang_count_per_hour
 
+    # we don't need more results than this, and it gets pretty big if we don't prune
+    for k, v in sorted(top_frames.iteritems(), key=lambda x: x[1]["hang_count_per_hour"])[:128]:
+        v["stacks"] = v["stacks"][:128]
+
     return top_frames
 
 def get_by_top_frame_by_thread(by_thread, usage_hours):
@@ -422,9 +426,6 @@ def write_file(name, stuff, config):
     jsonblob = json.dumps(stuff, ensure_ascii=False)
 
     if config['use_s3']:
-        # TODO: This was adapted from another report. I'm not actually sure
-        # what the process is for dumping stuff to s3, and would appreciate
-        # feedback!
         bucket = "telemetry-public-analysis-2"
         timestamped_s3_key = "bhr/data/hang_aggregates/" + name + ".json"
         client = boto3.client('s3', 'us-west-2')
