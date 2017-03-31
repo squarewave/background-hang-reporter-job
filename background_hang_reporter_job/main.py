@@ -43,7 +43,7 @@ def only_hangs_of_type(ping):
 
     result = []
 
-    if usage_hours == 0.0:
+    if usage_hours == 0:
         return result
 
     if ping['payload/childPayloads'] is not None:
@@ -60,7 +60,6 @@ def only_hangs_of_type(ping):
                         {
                             'build_date': build_date,
                             'thread_name': thread_hang['name'],
-                            'usage_hours': usage_hours,
                             'hang': x
                         }
                         for x in thread_hang['hangs']
@@ -76,22 +75,10 @@ def only_hangs_of_type(ping):
                     {
                         'build_date': build_date,
                         'thread_name': thread_hang['name'],
-                        'usage_hours': usage_hours,
                         'hang': x
                     }
                     for x in thread_hang['hangs']
                 ]
-
-    if (len(result) == 0):
-        result = [{
-            'build_date': build_date,
-            'thread_name': None,
-            'usage_hours': usage_hours,
-            'hang': None
-        }]
-    else:
-        for record in result:
-            record['usage_hours'] /= len(result)
 
     return result
 
@@ -105,13 +92,6 @@ def tupleize(l):
         return l
 
 def map_to_hang_data(hang):
-    if hang['hang'] is None:
-        return ((None, None, None), {
-            'hang_ms': 0,
-            'hang_count': 0,
-            'usage_hours': hang['usage_hours']
-        })
-
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
@@ -143,14 +123,12 @@ def map_to_hang_data(hang):
     return (key, {
         'hang_ms': hang_sum,
         'hang_count': hang_count,
-        'usage_hours': hang['usage_hours']
     })
 
 def merge_hang_data(a, b):
     return {
         'hang_ms': a['hang_ms'] + b['hang_ms'],
         'hang_count': a['hang_count'] + b['hang_count'],
-        'usage_hours': a['usage_hours'] + b['usage_hours'],
     }
 
 def get_grouped_sums_and_counts(hangs):
@@ -163,12 +141,6 @@ def group_by_date(stacks):
     for key, stats in stacks.iteritems():
         stack, thread_name, build_date = key;
 
-        usage_hours = stats['usage_hours']
-
-        if stack is None:
-            date['usage_hours'] += usage_hours
-            continue
-
         hang_ms = stats['hang_ms']
         hang_count = stats['hang_count']
 
@@ -178,7 +150,6 @@ def group_by_date(stacks):
         if not build_date in dates:
             dates[build_date] = {
                 "date": build_date,
-                "usage_hours": 0.0,
                 "threads": [],
             }
 
@@ -186,7 +157,6 @@ def group_by_date(stacks):
 
         date = dates[build_date]
 
-        date['usage_hours'] += usage_hours
         date["threads"].append((new_key, {
             'hang_ms': hang_ms,
             'hang_count': hang_count
@@ -219,6 +189,7 @@ def group_by_thread_name(stacks):
 
 def group_by_top_frame(stacks, usage_hours):
     top_frames = {}
+
     for stack, stats in stacks:
         hang_ms_per_hour = stats['hang_ms'] / usage_hours
         hang_count_per_hour = stats['hang_count'] / usage_hours
@@ -255,11 +226,22 @@ def get_by_top_frame_by_thread(by_thread, usage_hours):
         for k, g in by_thread.iteritems()
     }
 
-def get_by_thread_by_date(by_date):
+def get_by_thread_by_date(by_date, usage_hours):
     return {
-        k: get_by_top_frame_by_thread(group_by_thread_name(g["threads"]), g["usage_hours"])
+        k: get_by_top_frame_by_thread(group_by_thread_name(g["threads"]), usage_hours[g["date"]])
         for k, g in by_date.iteritems()
     }
+
+def get_usage_hours(ping):
+    build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
+    usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
+    return (build_date, usage_hours)
+
+def merge_usage_hours(a, b):
+    return a + b
+
+def get_usage_hours_by_date(pings):
+    return pings.map(get_usage_hours).reduceByKey(merge_usage_hours).collectAsMap()
 
 def transform_pings(pings):
     windows_pings_only = pings.filter(windows_only)
@@ -267,7 +249,8 @@ def transform_pings(pings):
     hangs = filter_for_hangs_of_type(windows_pings_only)
     grouped_hangs = get_grouped_sums_and_counts(hangs)
     by_date = group_by_date(grouped_hangs)
-    result = get_by_thread_by_date(by_date)
+    usage_hours = get_usage_hours_by_date(windows_pings_only)
+    result = get_by_thread_by_date(by_date, usage_hours)
 
     return result
 
