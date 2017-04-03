@@ -218,9 +218,12 @@ def group_by_top_frame(stacks, usage_hours):
         top_frame["hang_ms_per_hour"] += hang_ms_per_hour
         top_frame["hang_count_per_hour"] += hang_count_per_hour
 
+    top_frames = {k: v for k,v in sorted(top_frames.iteritems(),
+        key=lambda x: -x[1]["hang_count_per_hour"])[:64]}
+
     # we don't need more results than this, and it gets pretty big if we don't prune
-    for k, v in sorted(top_frames.iteritems(), key=lambda x: x[1]["hang_count_per_hour"])[:128]:
-        v["stacks"] = v["stacks"][:128]
+    for k, v in top_frames.iteritems():
+        v["stacks"] = v["stacks"][:64]
 
     return top_frames
 
@@ -446,7 +449,7 @@ def etl_job(sc, sqlContext, config=None):
     final_config = {
         'days_to_aggregate': 30,
         'use_s3': True,
-        'sample_size': 1.0,
+        'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
     }
 
