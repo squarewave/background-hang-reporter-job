@@ -424,27 +424,27 @@ def symbolicate_stacks(results, config):
     stack_dict = process_modules(modules, config)
     apply_processed_modules(results, stack_dict)
 
-def write_file(name, stuff, config):
-    end_date = datetime.today()
-    end_date_str = end_date.strftime("%Y%m%d")
+    def write_file(name, stuff, config):
+        end_date = datetime.today()
+        end_date_str = end_date.strftime("%Y%m%d")
 
-    filename = "./output/%s-%s.json" % (name, end_date_str)
-    jsonblob = json.dumps(stuff, ensure_ascii=False)
+        filename = "./output/%s-%s.json" % (name, end_date_str)
+        jsonblob = json.dumps(stuff, ensure_ascii=False)
 
-    if config['use_s3']:
-        bucket = "telemetry-public-analysis-2"
-        timestamped_s3_key = "bhr/data/hang_aggregates/" + name + ".json"
-        client = boto3.client('s3', 'us-west-2')
-        transfer = S3Transfer(client)
-        transfer.upload_file(filename,
-                             bucket,
-                             timestamped_s3_key,
-                             extra_args={'ContentType':'application/json'})
-    else:
         if not os.path.exists('./output'):
             os.makedirs('./output')
         with open(filename, 'w') as f:
             f.write(jsonblob)
+
+        if config['use_s3']:
+            bucket = "telemetry-public-analysis-2"
+            timestamped_s3_key = "bhr/data/hang_aggregates/" + name + ".json"
+            client = boto3.client('s3', 'us-west-2')
+            transfer = S3Transfer(client)
+            transfer.upload_file(filename,
+                                 bucket,
+                                 timestamped_s3_key,
+                                 extra_args={'ContentType':'application/json'})
 
 def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
