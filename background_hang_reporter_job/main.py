@@ -10,6 +10,9 @@ from StringIO import StringIO
 from sets import Set
 from datetime import datetime, timedelta
 
+import boto3
+from boto3.s3.transfer import S3Transfer
+
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
