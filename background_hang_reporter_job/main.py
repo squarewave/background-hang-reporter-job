@@ -382,6 +382,9 @@ def decode_response(response):
 def format_frame(symbol, module_name):
     return "{} (in {})".format(symbol, module_name)
 
+def smart_hex(offset):
+    return hex(int(offset))
+
 def process_modules(stacks_by_module, config):
     stack_dict = {}
 
@@ -401,10 +404,10 @@ def process_modules(stacks_by_module, config):
                 if symbol is not None:
                     stack_dict[breakpad_id, offset] = format_frame(symbol, module_name)
                 else:
-                    stack_dict[breakpad_id, offset] = format_frame(hex(offset), module_name)
+                    stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
         else:
             for offset in offsets:
-                stack_dict[breakpad_id, offset] = format_frame(hex(offset), module_name)
+                stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
 
     return stack_dict
 
@@ -416,8 +419,8 @@ def apply_processed_modules(results, stack_dict):
             if memory_map is not None:
                 symbolicated = [
                     stack_dict.get((memory_map[module_index][1], offset),
-                        format_frame(hex(offset), memory_map[module_index][1]))
-                    if module_index != -1 else hex(offset)
+                        format_frame(smart_hex(offset), memory_map[module_index][1]))
+                    if module_index != -1 else smart_hex(offset)
                     for module_index, offset in stack
                 ]
             data_stacks.append(((pseudo, symbolicated), stats))
