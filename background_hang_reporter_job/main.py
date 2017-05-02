@@ -1,20 +1,22 @@
-import os
-import ujson as json
-import pandas as pd
-import urllib
-import eventlet
-from eventlet.green import urllib2
-import contextlib
-import gzip
-from StringIO import StringIO
-from sets import Set
-from datetime import datetime, timedelta
-
 import boto3
-from boto3.s3.transfer import S3Transfer
+import contextlib
+import eventlet
+import gzip
+import os
+import pandas as pd
+import ujson as json
+import urllib
 
+from bisect import bisect
+from boto3.s3.transfer import S3Transfer
+from datetime import datetime, timedelta
+from eventlet.green import urllib2
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
+from sets import Set
+from StringIO import StringIO
+
+from profile import process_into_profile
 
 def get_data(sc, config):
     start_date = (datetime.today() - timedelta(days=config['days_to_aggregate']))
@@ -66,6 +68,10 @@ def only_hangs_of_type(ping):
                             'hang': x
                         }
                         for x in thread_hang['hangs']
+                        if 'nativeStack' in x
+                        and type(x['nativeStack']) is dict
+                        and len(x['nativeStack']['stacks']) > 0
+                        and len(x['nativeStack']['stacks'][0]) > 0
                     ]
 
     if ping['payload/threadHangStats'] is not None:
@@ -81,6 +87,11 @@ def only_hangs_of_type(ping):
                         'hang': x
                     }
                     for x in thread_hang['hangs']
+                    if 'nativeStack' in x
+                    and type(x['nativeStack']) is dict
+                    # 'stacks' is always a one-length list. Make sure the first item isn't empty
+                    and len(x['nativeStack']['stacks']) > 0
+                    and len(x['nativeStack']['stacks'][0]) > 0
                 ]
 
     return result
@@ -88,44 +99,63 @@ def only_hangs_of_type(ping):
 def filter_for_hangs_of_type(pings):
     return pings.flatMap(lambda p: only_hangs_of_type(p))
 
-def tupleize(l):
-    if type(l) is list:
-        return tuple(tupleize(x) for x in l)
-    else:
-        return l
+def map_to_frame_info(hang):
+    memory_map = hang['hang']['nativeStack']['memoryMap']
+    stack = hang['hang']['nativeStack']['stacks'][0]
+    return [
+        (tuple(memory_map[module_index]), (offset,)) if module_index != -1 else (None, (offset,))
+        for module_index, offset in stack
+    ]
 
-def map_to_hang_data(hang):
+def get_stacks_by_module(hangs):
+    return (hangs.flatMap(map_to_frame_info)
+        .filter(lambda hang_tuple: hang_tuple[0] is not None)
+        .distinct()
+        .reduceByKey(lambda a,b: a + b).collectAsMap())
+
+def symbolicate_stacks(memory_map, stack, processed_modules):
+    symbolicated = []
+    num_symbolicated = 0
+    for module_index, offset in stack:
+        if module_index != -1:
+            debug_name, breakpad_id = memory_map[module_index]
+            processed = processed_modules[breakpad_id, offset]
+            if processed is not None:
+                symbolicated.append(processed)
+                num_symbolicated += 1
+            else:
+                symbolicated.append(smart_hex(offset))
+        else:
+            symbolicated.append(smart_hex(offset))
+    return symbolicated, float(num_symbolicated) / float(len(symbolicated))
+
+def map_to_hang_data(hang, processed_modules, usage_hours_by_date):
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
     weights = pd.Series(key_ints, index=key_ints)
     hang_sum = (hist * weights)[hist.index >= 100].sum()
     hang_count = hist[hist.index >= 100].sum()
+    build_date = hang['build_date']
+    usage_hours = usage_hours_by_date[build_date]
 
-    # Observed nativeStack being a list in the wild. Not sure how - make sure it's a dict.
-    if ('nativeStack' in hang['hang']
-        and type(hang['hang']['nativeStack']) is dict
-        and len(hang['hang']['nativeStack']['stacks']) > 0):
-        stack_tuple = (
-            tuple(hang['hang']['stack']),
-            tupleize(hang['hang']['nativeStack']['memoryMap']),
-            tupleize(hang['hang']['nativeStack']['stacks'][0]),
-        )
-    else:
-        stack_tuple = (
-            tuple(hang['hang']['stack']),
-            None,
-            None
-        )
+    if usage_hours <= 0:
+        return None
 
-    key = (stack_tuple, hang['thread_name'], hang['build_date'])
+    memory_map = hang['hang']['nativeStack']['memoryMap']
+    native_stack = hang['hang']['nativeStack']['stacks'][0]
+    symbolicated, percent_symbolicated = symbolicate_stacks(memory_map, native_stack, processed_modules)
 
-    # our key will be the stack, the thread name, and the build ID. Once we've
-    # reduced on this we'll collect as a map, since there should only be
-    # ~10^1 days, 10^1 threads, 10^3 stacks : 100,000 records
+    # We only want mostly-symbolicated stacks. Anything else is A) not useful
+    # information, and B) probably a local build, which could be hanging for
+    # much different reasons.
+    if percent_symbolicated < 0.8:
+        return None
+
+    key = (tuple(symbolicated), hang['thread_name'], build_date)
     return (key, {
-        'hang_ms': hang_sum,
-        'hang_count': hang_count,
+        'hang_ms': float(hang_sum) / usage_hours,
+        'hang_count': float(hang_count) / usage_hours,
     })
 
 def merge_hang_data(a, b):
@@ -134,113 +164,12 @@ def merge_hang_data(a, b):
         'hang_count': a['hang_count'] + b['hang_count'],
     }
 
-def get_grouped_sums_and_counts(hangs):
-    return (hangs.map(map_to_hang_data)
+def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date):
+    return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date))
+        .filter(lambda hang: hang is not None)
         .reduceByKey(merge_hang_data)
-        .collectAsMap())
-
-def group_by_date(stacks):
-    dates = {}
-    for key, stats in stacks.iteritems():
-        stack, thread_name, build_date = key;
-
-        hang_ms = stats['hang_ms']
-        hang_count = stats['hang_count']
-
-        if len(stack) == 0:
-            continue
-
-        if not build_date in dates:
-            dates[build_date] = {
-                "date": build_date,
-                "threads": [],
-            }
-
-        new_key = (stack, thread_name)
-
-        date = dates[build_date]
-
-        date["threads"].append((new_key, {
-            'hang_ms': hang_ms,
-            'hang_count': hang_count
-        }))
-
-    return dates
-
-def group_by_thread_name(stacks):
-    thread_names = {}
-    for key, stats in stacks:
-        new_key, thread_name = key
-
-        hang_ms = stats['hang_ms']
-        hang_count = stats['hang_count']
-
-        if not thread_name in thread_names:
-            thread_names[thread_name] = {
-                "thread": thread_name,
-                "hangs": [],
-            }
-
-        thread_name_obj = thread_names[thread_name]
-
-        thread_name_obj["hangs"].append((new_key, {
-            'hang_ms': hang_ms,
-            'hang_count': hang_count
-        }))
-
-    return thread_names
-
-def group_by_top_frame(stacks, usage_hours):
-    top_frames = {}
-
-    for stack, stats in stacks:
-        hang_ms_per_hour = stats['hang_ms'] / usage_hours
-        hang_count_per_hour = stats['hang_count'] / usage_hours
-
-        if len(stack[0]) == 0:
-            stack_top_frame = 'empty_pseudo_stack'
-        else:
-            stack_top_frame = stack[0][-1]
-
-        if not stack_top_frame in top_frames:
-            top_frames[stack_top_frame] = {
-                "stacks": [],
-                "hang_ms_per_hour": 0,
-                "hang_count_per_hour": 0
-            }
-
-        top_frame = top_frames[stack_top_frame]
-
-        top_frame["stacks"].append((stack, {
-            'hang_ms_per_hour': hang_ms_per_hour,
-            'hang_count_per_hour': hang_count_per_hour
-        }))
-        top_frame["stacks"] = sorted(top_frame["stacks"],
-                                     key=lambda s: -s[1]['hang_count_per_hour'])
-
-        top_frame["hang_ms_per_hour"] += hang_ms_per_hour
-        top_frame["hang_count_per_hour"] += hang_count_per_hour
-
-    top_frames = {k: v for k,v in sorted(top_frames.iteritems(),
-        key=lambda x: -x[1]["hang_count_per_hour"])[:64]}
-
-    # we don't need more results than this, and it gets pretty big if we don't prune
-    for k, v in top_frames.iteritems():
-        v["stacks"] = v["stacks"][:64]
-
-    return top_frames
-
-def get_by_top_frame_by_thread(by_thread, usage_hours):
-    return {
-        k: group_by_top_frame(g["hangs"], usage_hours)
-        for k, g in by_thread.iteritems()
-    }
-
-def get_by_thread_by_date(by_date, usage_hours):
-    return {
-        k: get_by_top_frame_by_thread(group_by_thread_name(g["threads"]), usage_hours[g["date"]])
-        for k, g in by_date.iteritems()
-    }
+        .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
+        .collect())
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
@@ -252,47 +181,6 @@ def merge_usage_hours(a, b):
 
 def get_usage_hours_by_date(pings):
     return pings.map(get_usage_hours).reduceByKey(merge_usage_hours).collectAsMap()
-
-def transform_pings(pings):
-    windows_pings_only = pings.filter(windows_only)
-
-    hangs = filter_for_hangs_of_type(windows_pings_only)
-    grouped_hangs = get_grouped_sums_and_counts(hangs)
-    by_date = group_by_date(grouped_hangs)
-    usage_hours = get_usage_hours_by_date(windows_pings_only)
-    result = get_by_thread_by_date(by_date, usage_hours)
-
-    return result
-
-def enumerate_threads(results):
-    for date, threads in results.iteritems():
-        for thread in threads.iteritems():
-            # TODO: is there an equivalent to JS's "yield*" in Python?
-            yield thread
-
-def enumerate_signatures(results):
-    for thread_name, signatures in enumerate_threads(results):
-        for signature_data in signatures.iteritems():
-            yield signature_data
-
-def enumerate_stacks(results):
-    for signature, data in enumerate_signatures(results):
-        for stack_data in data['stacks']:
-            yield stack_data
-
-def get_stacks_by_module(results):
-    breakpad_dict = {}
-    for stack_info, stats in enumerate_stacks(results):
-        pseudo, memory_map, stack = stack_info
-        if memory_map is not None:
-            for i, (module_name, breakpad_id) in enumerate(memory_map):
-                if breakpad_id not in breakpad_dict:
-                    breakpad_dict[module_name, breakpad_id] = Set()
-                for stack_module_index, offset in stack:
-                    if stack_module_index == i:
-                        breakpad_dict[module_name, breakpad_id].add(offset)
-
-    return breakpad_dict
 
 def make_sym_map(data):
     public_symbols = {}
@@ -334,23 +222,46 @@ def get_file_URL(module, config):
         urllib.quote_plus(file_name)
     ])
 
-def get_key(val, sorted_keys):
-    if len(sorted_keys) == 0:
-        return None
+def process_modules(stacks_by_module, config):
+    stack_dict = {}
 
-    # simple binary search for biggest key less than val
-    search_range = (0, len(sorted_keys))
+    file_URLs = [
+        get_file_URL(module, config)
+        for module, offsets in stacks_by_module.iteritems()
+    ]
+    pool = eventlet.GreenPool()
 
-    while True:
-        index = (search_range[0] + search_range[1]) / 2
-        if index + 1 == len(sorted_keys):
-            return sorted_keys[index]
-        if sorted_keys[index] <= val and sorted_keys[index + 1] > val:
-            return sorted_keys[index]
-        elif sorted_keys[index] > val:
-            search_range = (search_range[0], index)
+    for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
+        module_name, breakpad_id = module
+
+        if success:
+            sorted_keys, sym_map = make_sym_map(response)
+
+            for offset in offsets:
+                i = bisect(sorted_keys, offset)
+                key = sorted_keys[i - 1] if i else None
+
+                symbol = sym_map.get(key)
+                if symbol is not None:
+                    stack_dict[breakpad_id, offset] = format_frame(symbol, module_name)
+                else:
+                    stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
         else:
-            search_range = (index+1, search_range[1])
+            for offset in offsets:
+                stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
+
+    return stack_dict
+
+def transform_pings(pings, config):
+    windows_pings_only = pings.filter(windows_only)
+
+    hangs = filter_for_hangs_of_type(windows_pings_only)
+    stacks_by_module = get_stacks_by_module(hangs)
+    processed_modules = process_modules(stacks_by_module, config)
+
+    usage_hours_by_date = get_usage_hours_by_date(windows_pings_only)
+    result = get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date)
+    return result
 
 def fetch_URL(url):
     try:
@@ -385,52 +296,6 @@ def format_frame(symbol, module_name):
 def smart_hex(offset):
     return hex(int(offset))
 
-def process_modules(stacks_by_module, config):
-    stack_dict = {}
-
-    file_URLs = [get_file_URL(module, config) for module, offsets in stacks_by_module.iteritems()]
-    pool = eventlet.GreenPool()
-
-    for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
-        module_name, breakpad_id = module
-
-        if success:
-            sorted_keys, sym_map = make_sym_map(response)
-
-            for offset in offsets:
-                key = get_key(offset, sorted_keys)
-
-                symbol = sym_map.get(key)
-                if symbol is not None:
-                    stack_dict[breakpad_id, offset] = format_frame(symbol, module_name)
-                else:
-                    stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
-        else:
-            for offset in offsets:
-                stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
-
-    return stack_dict
-
-def apply_processed_modules(results, stack_dict):
-    for signature, data in enumerate_signatures(results):
-        data_stacks = []
-        for (pseudo, memory_map, stack), stats in data['stacks']:
-            symbolicated = None
-            if memory_map is not None:
-                symbolicated = [
-                    stack_dict.get((memory_map[module_index][1], offset),
-                        format_frame(smart_hex(offset), memory_map[module_index][1]))
-                    if module_index != -1 else smart_hex(offset)
-                    for module_index, offset in stack
-                ]
-            data_stacks.append(((pseudo, symbolicated), stats))
-        data['stacks'] = data_stacks
-
-def symbolicate_stacks(results, config):
-    modules = get_stacks_by_module(results)
-    stack_dict = process_modules(modules, config)
-    apply_processed_modules(results, stack_dict)
-
 def write_file(name, stuff, config):
     end_date = datetime.today()
     end_date_str = end_date.strftime("%Y%m%d")
@@ -457,17 +322,17 @@ def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {
-        'days_to_aggregate': 30,
+        'days_to_aggregate': 7,
         'use_s3': True,
-        'sample_size': 0.1,
+        'sample_size': 1.0,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
     }
 
     if config is not None:
         final_config.update(config)
 
-    results = transform_pings(get_data(sc, final_config))
-
-    symbolicate_stacks(results, final_config)
-
+    results = transform_pings(get_data(sc, final_config), final_config)
     write_file('stacks_by_day', results, final_config)
+
+    profile = process_into_profile(results)
+    write_file('profile', profile, final_config)
