@@ -324,7 +324,7 @@ def etl_job(sc, sqlContext, config=None):
     final_config = {
         'days_to_aggregate': 7,
         'use_s3': True,
-        'sample_size': 1.0,
+        'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
     }
 
@@ -335,4 +335,4 @@ def etl_job(sc, sqlContext, config=None):
     write_file('stacks_by_day', results, final_config)
 
     profile = process_into_profile(results)
-    write_file('profile', profile, final_config)
+    write_file('hang_profile', profile, final_config)
