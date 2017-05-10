@@ -120,8 +120,8 @@ def get_default_thread(name):
         'time': 0.0,
         'dates': UniqueKeyedTable(lambda date: ({
             'date': date,
-            'stack_hang_ms': GrowToFitList(),
-            'stack_hang_count': GrowToFitList()
+            'stackHangMs': GrowToFitList(),
+            'stackHangCount': GrowToFitList()
         })),
     }
 
@@ -140,9 +140,37 @@ def process_thread(thread):
 
 def process_into_profile(data):
     thread_table = UniqueKeyedTable(get_default_thread)
+    preprocessed_thread_table = UniqueKeyedTable(lambda key: {})
 
     for row in data:
         stack, thread_name, build_date, hang_ms, hang_count = row
+        frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
+
+        last_frame = None
+        for i in xrange(1,len(stack)):
+            frame_to_prefix[stack[i]] = stack[i-1]
+
+    for row in data:
+        stack, thread_name, build_date, hang_ms, hang_count = row
+
+        if len(stack) == 25:
+            frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
+            top_frame = stack[-1];
+
+            # cap out at stacks of length == 25 + 75
+            for i in xrange(0, 75):
+                if top_frame in frame_to_prefix:
+                    prefix = frame_to_prefix[top_frame]
+                    stack.append(prefix)
+                    top_frame = prefix
+                else:
+                    break
+
+    for row in data:
+        stack, thread_name, build_date, hang_ms, hang_count = row
+
+        if stack.length >= 100:
+            continue
 
         thread = thread_table.key_to_item(thread_name)
         stack_table = thread['stackTable']
