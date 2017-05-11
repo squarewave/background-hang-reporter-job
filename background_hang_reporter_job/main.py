@@ -272,18 +272,31 @@ def transform_pings(pings, config):
     return result
 
 def fetch_URL(url):
+    result = False, ""
     try:
         with contextlib.closing(urllib2.urlopen(url)) as response:
             responseCode = response.getcode()
             if responseCode == 404:
                 return False, ""
             if responseCode != 200:
-                return False, ""
+                result = False, ""
             return True, decode_response(response)
     except IOError as e:
-        pass
+        result = False, ""
 
-    return False, ""
+    if not result[0]:
+        try:
+            with contextlib.closing(urllib2.urlopen(url)) as response:
+                responseCode = response.getcode()
+                if responseCode == 404:
+                    return False, ""
+                if responseCode != 200:
+                    result = False, ""
+                return True, decode_response(response)
+        except IOError as e:
+            result = False, ""
+
+    return result
 
 def decode_response(response):
     headers = response.info()
