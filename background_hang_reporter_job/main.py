@@ -309,11 +309,14 @@ def write_file(name, stuff, config):
     end_date_str = end_date.strftime("%Y%m%d")
 
     filename = "./output/%s-%s.json" % (name, end_date_str)
+    gzfilename = filename + '.gz'
     jsonblob = json.dumps(stuff, ensure_ascii=False)
 
     if not os.path.exists('./output'):
         os.makedirs('./output')
     with open(filename, 'w') as f:
+        f.write(jsonblob)
+    with gzip.open(gzfilename, 'w') as f:
         f.write(jsonblob)
 
     if config['use_s3']:
@@ -325,6 +328,13 @@ def write_file(name, stuff, config):
                              bucket,
                              timestamped_s3_key,
                              extra_args={'ContentType':'application/json'})
+        transfer.upload_file(gzfilename,
+                             bucket,
+                             timestamped_s3_key,
+                             extra_args={
+                                'ContentType':'application/json',
+                                'ContentEncoding':'gzip'
+                            })
 
 def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
