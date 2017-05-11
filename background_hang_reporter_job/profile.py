@@ -142,6 +142,12 @@ def process_into_profile(data):
     thread_table = UniqueKeyedTable(get_default_thread)
     preprocessed_thread_table = UniqueKeyedTable(lambda key: {})
 
+    data = [
+        (list(stack), thread_name, build_date, hang_ms, hang_count)
+        for stack, thread_name, build_date, hang_ms, hang_count
+        in data
+    ]
+
     for row in data:
         stack, thread_name, build_date, hang_ms, hang_count = row
         frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
@@ -169,7 +175,7 @@ def process_into_profile(data):
     for row in data:
         stack, thread_name, build_date, hang_ms, hang_count = row
 
-        if stack.length >= 100:
+        if len(stack) >= 100:
             continue
 
         thread = thread_table.key_to_item(thread_name)

@@ -42,11 +42,19 @@ def get_data(sc, config):
 def windows_only(p):
     return p["environment/system/os/name"] == "Windows_NT"
 
+def ping_is_valid(ping):
+    if not isinstance(ping["application/buildId"], basestring):
+        return False
+    if type(ping["payload/info/subsessionLength"]) != int:
+        return False
+
+    return True
+
 def only_hangs_of_type(ping):
+    result = []
+
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
     usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
-
-    result = []
 
     if usage_hours == 0:
         return result
@@ -253,7 +261,7 @@ def process_modules(stacks_by_module, config):
     return stack_dict
 
 def transform_pings(pings, config):
-    windows_pings_only = pings.filter(windows_only)
+    windows_pings_only = pings.filter(windows_only).filter(ping_is_valid)
 
     hangs = filter_for_hangs_of_type(windows_pings_only)
     stacks_by_module = get_stacks_by_module(hangs)
