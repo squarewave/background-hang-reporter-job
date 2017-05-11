@@ -199,12 +199,12 @@ def process_into_profile(data):
             last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack});
 
         date = dates.key_to_item(build_date)
-        if date['stack_hang_ms'][last_stack] is None:
-            date['stack_hang_ms'][last_stack] = 0.0
-            date['stack_hang_count'][last_stack] = 0
+        if date['stackHangMs'][last_stack] is None:
+            date['stackHangMs'][last_stack] = 0.0
+            date['stackHangCount'][last_stack] = 0
 
-        date['stack_hang_ms'][last_stack] += hang_ms
-        date['stack_hang_count'][last_stack] += hang_count
+        date['stackHangMs'][last_stack] += hang_ms
+        date['stackHangCount'][last_stack] += hang_count
 
     return {
         'threads': [process_thread(t) for t in thread_table.get_items()],
