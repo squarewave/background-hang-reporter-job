@@ -153,8 +153,8 @@ def process_into_profile(data):
         frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
 
         last_frame = None
-        for i in xrange(1,len(stack)):
-            frame_to_prefix[stack[i]] = stack[i-1]
+        for i in xrange(0,len(stack) - 1):
+            frame_to_prefix[stack[i]] = stack[i + 1]
 
     for row in data:
         stack, thread_name, build_date, hang_ms, hang_count = row
