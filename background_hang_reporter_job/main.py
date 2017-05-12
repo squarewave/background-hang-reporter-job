@@ -353,7 +353,7 @@ def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {
-        'days_to_aggregate': 7,
+        'days_to_aggregate': 30,
         'use_s3': True,
         'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
