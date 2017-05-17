@@ -41,6 +41,9 @@ class UniqueKeyedTable:
     def struct_of_arrays(self):
         return to_struct_of_arrays(self.items)
 
+    def sorted_struct_of_arrays(self, key):
+        return to_struct_of_arrays(sorted(self.items, key=key))
+
     def get_dict_key(self, key):
         # Only supports one level of nesting
         if type(key) is dict:
@@ -100,6 +103,16 @@ def get_default_thread(name):
         'prefix': key['prefix'],
         'func': func_table.key_to_index({'name': key['name'], 'lib': key['lib']}),
     }))
+    pseudo_stack_table = UniqueKeyedTable(lambda key: ({
+        'prefix': key['prefix'],
+        'func': func_table.key_to_index({'name': key['name'], 'lib': None}),
+    }))
+    stack_to_pseudo_stacks_table = UniqueKeyedTable(lambda key: ({
+        'stack': key['stack'],
+        'pseudo_stack': key['pseudo_stack'],
+        'stackHangMs': 0.0,
+        'stackHangCount': 0.0,
+    }))
 
     stack_table.key_to_index({'name': '(root)', 'lib': None, 'prefix': None})
 
@@ -113,6 +126,8 @@ def get_default_thread(name):
         'libs': libs,
         'funcTable': func_table,
         'stackTable': stack_table,
+        'pseudoStackTable': pseudo_stack_table,
+        'stackToPseudoStacksTable': stack_to_pseudo_stacks_table,
         'stringArray': strings_table,
         'processType': 'default',
         'tid': tid,
@@ -134,6 +149,8 @@ def process_thread(thread):
         'libs': thread['libs'].get_items(),
         'funcTable': thread['funcTable'].struct_of_arrays(),
         'stackTable': thread['stackTable'].struct_of_arrays(),
+        'pseudoStackTable': thread['pseudoStackTable'].struct_of_arrays(),
+        'stackToPseudoStacksTable': thread['stackToPseudoStacksTable'].sorted_struct_of_arrays(lambda r: r['stack']),
         'dates': thread['dates'].get_items(),
         'stringArray': thread['stringArray'].get_items(),
     }
@@ -143,13 +160,13 @@ def process_into_profile(data):
     preprocessed_thread_table = UniqueKeyedTable(lambda key: {})
 
     data = [
-        (list(stack), thread_name, build_date, hang_ms, hang_count)
-        for stack, thread_name, build_date, hang_ms, hang_count
+        (list(stack), pseudo, thread_name, build_date, hang_ms, hang_count)
+        for stack, pseudo, thread_name, build_date, hang_ms, hang_count
         in data
     ]
 
     for row in data:
-        stack, thread_name, build_date, hang_ms, hang_count = row
+        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
         frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
 
         last_frame = None
@@ -157,7 +174,7 @@ def process_into_profile(data):
             frame_to_prefix[stack[i]] = stack[i + 1]
 
     for row in data:
-        stack, thread_name, build_date, hang_ms, hang_count = row
+        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
         if len(stack) == 25:
             frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
@@ -173,13 +190,15 @@ def process_into_profile(data):
                     break
 
     for row in data:
-        stack, thread_name, build_date, hang_ms, hang_count = row
+        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
         if len(stack) >= 100:
             continue
 
         thread = thread_table.key_to_item(thread_name)
         stack_table = thread['stackTable']
+        pseudo_stack_table = thread['pseudoStackTable']
+        stack_to_pseudo_stacks_table = thread['stackToPseudoStacksTable']
         dates = thread['dates']
 
         last_stack = 0
@@ -196,7 +215,7 @@ def process_into_profile(data):
                 func_name = frame;
                 lib_name = 'unknown';
 
-            last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack});
+            last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
 
         date = dates.key_to_item(build_date)
         if date['stackHangMs'][last_stack] is None:
@@ -205,6 +224,18 @@ def process_into_profile(data):
 
         date['stackHangMs'][last_stack] += hang_ms
         date['stackHangCount'][last_stack] += hang_count
+
+        last_pseudo = 0
+        for frame in reversed(pseudo):
+            last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
+
+        stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
+            'stack': last_stack,
+            'pseudo_stack': last_pseudo
+        })
+
+        stack_to_pseudo_stack['stackHangMs'] += hang_ms
+        stack_to_pseudo_stack['stackHangCount'] += hang_count
 
     return {
         'threads': [process_thread(t) for t in thread_table.get_items()],

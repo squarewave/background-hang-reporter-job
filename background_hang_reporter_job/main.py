@@ -162,7 +162,7 @@ def map_to_hang_data(hang, processed_modules, usage_hours_by_date):
     if percent_symbolicated < 0.8:
         return None
 
-    key = (tuple(symbolicated), hang['thread_name'], build_date)
+    key = (tuple(symbolicated), tuple(hang['hang']['stack']), hang['thread_name'], build_date)
     return (key, {
         'hang_ms': float(hang_sum) / usage_hours,
         'hang_count': float(hang_count) / usage_hours,
