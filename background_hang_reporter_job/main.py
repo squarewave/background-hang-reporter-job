@@ -18,6 +18,8 @@ from StringIO import StringIO
 
 from profile import process_into_profile
 
+UNSYMBOLICATED = "<unsymbolicated>"
+
 def get_data(sc, config):
     start_date = (datetime.today() - timedelta(days=config['days_to_aggregate']))
     start_date_str = start_date.strftime("%Y%m%d")
@@ -132,9 +134,9 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
                 symbolicated.append(processed)
                 num_symbolicated += 1
             else:
-                symbolicated.append(smart_hex(offset))
+                symbolicated.append(format_frame(UNSYMBOLICATED, debug_name))
         else:
-            symbolicated.append(smart_hex(offset))
+            symbolicated.append(format_frame(UNSYMBOLICATED, "unknown"))
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
 def map_to_hang_data(hang, processed_modules, usage_hours_by_date):
@@ -253,10 +255,10 @@ def process_modules(stacks_by_module, config):
                 if symbol is not None:
                     stack_dict[breakpad_id, offset] = format_frame(symbol, module_name)
                 else:
-                    stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
+                    stack_dict[breakpad_id, offset] = format_frame(UNSYMBOLICATED, module_name)
         else:
             for offset in offsets:
-                stack_dict[breakpad_id, offset] = format_frame(smart_hex(offset), module_name)
+                stack_dict[breakpad_id, offset] = format_frame(UNSYMBOLICATED, module_name)
 
     return stack_dict
 
