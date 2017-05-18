@@ -5,6 +5,28 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
+stack_condense_groups = [
+    # TODO: this list is a work in progress
+    ('(script)', [
+        r'^js::',
+        r'^JSFunction::',
+        r'^JSObject::',
+        r'^InternalCall$',
+        r'^InternalConstruct$',
+        r'^GetNameOperation$',
+        r'^SetPropertyOperation$',
+        r'^Interpret$',
+        r'^XPC_WN_CallMethod',
+        r'^XPCWrappedNative::CallMethod',
+        r'^XPCConvert::',
+        r'^date_parse$',
+        r'^json_parse$',
+        r'^xpc::',
+        r'^NumberFormat$',
+        r'^LegacyIntlInitialize$',
+    ]),
+]
+
 def to_struct_of_arrays(a):
     if len(a) == 0:
         raise Exception('Need at least one item in array for this to work.')
@@ -202,6 +224,7 @@ def process_into_profile(data):
         dates = thread['dates']
 
         last_stack = 0
+        last_stack_condensed = False
         for frame in reversed(stack):
             cpp_match = (
                 re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
@@ -215,6 +238,20 @@ def process_into_profile(data):
                 func_name = frame;
                 lib_name = 'unknown';
 
+            condensed = False
+            for condensed_name, patterns in stack_condense_groups:
+                for pattern in patterns:
+                    if re.search(pattern, func_name):
+                        condensed = True
+                        func_name = condensed_name
+                        break
+                if condensed:
+                    break
+
+            if condensed and last_stack_condensed:
+                continue
+
+            last_stack_condensed = condensed
             last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
 
         date = dates.key_to_item(build_date)
