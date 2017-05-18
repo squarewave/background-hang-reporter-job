@@ -272,11 +272,7 @@ def process_into_profile(data):
 
             last_stack_condensed = condensed
             last_lib_name = lib_name
-            last_stack = stack_table.key_to_index({
-                'name': func_name,
-                'lib': lib_name,
-                'prefix': last_stack
-            })
+            last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
 
         date = dates.key_to_item(build_date)
         if date['stackHangMs'][last_stack] is None:
@@ -288,11 +284,7 @@ def process_into_profile(data):
 
         last_pseudo = 0
         for frame in reversed(pseudo):
-            last_pseudo = pseudo_stack_table.key_to_index({
-                'name': frame,
-                'prefix': last_pseudo,
-                'last_stack': last_stack
-            })
+            last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
 
         stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
             'stack': last_stack,
