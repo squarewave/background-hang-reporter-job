@@ -241,6 +241,8 @@ def process_modules(stacks_by_module, config):
     ]
     pool = eventlet.GreenPool()
 
+    print "({} distinct module URLs)".format(len(file_URLs))
+
     for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
         module_name, breakpad_id = module
 
@@ -263,13 +265,19 @@ def process_modules(stacks_by_module, config):
     return stack_dict
 
 def transform_pings(pings, config):
+    print "Filtering to Windows pings..."
     windows_pings_only = pings.filter(windows_only).filter(ping_is_valid)
 
+    print "Filtering to hangs with native stacks..."
     hangs = filter_for_hangs_of_type(windows_pings_only)
+    print "Getting stacks by module..."
     stacks_by_module = get_stacks_by_module(hangs)
+    print "Processing modules..."
     processed_modules = process_modules(stacks_by_module, config)
 
+    print "Getting usage hours..."
     usage_hours_by_date = get_usage_hours_by_date(windows_pings_only)
+    print "Grouping stacks..."
     result = get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date)
     return result
 

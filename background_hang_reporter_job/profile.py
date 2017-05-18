@@ -187,6 +187,7 @@ def process_into_profile(data):
         in data
     ]
 
+    print "Preprocessing stacks for profile..."
     for row in data:
         stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
         frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
@@ -211,6 +212,7 @@ def process_into_profile(data):
                 else:
                     break
 
+    print "Preprocessing all stacks for profile..."
     for row in data:
         stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
@@ -274,6 +276,7 @@ def process_into_profile(data):
         stack_to_pseudo_stack['stackHangMs'] += hang_ms
         stack_to_pseudo_stack['stackHangCount'] += hang_count
 
+    print "Processing into final format..."
     return {
         'threads': [process_thread(t) for t in thread_table.get_items()],
     }
