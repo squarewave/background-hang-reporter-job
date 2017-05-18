@@ -9,6 +9,19 @@ stack_condense_groups = [
     # TODO: this list is a work in progress
     ('(script)', [
         r'^js::',
+        r'^JS::',
+        r'^JS_',
+        r'^Compile$',
+        r'^BytecodeCompiler::',
+        r'^SharedStub$',
+        r'^DefinePropertyById$',
+        r'^DefineSelfHostedProperty$',
+        r'^mozJSComponentLoader::',
+        r'^XPCWrappedNative::',
+        r'^XPCWrappedNativeProto::',
+        r'^nsXPCWrappedJS::',
+        r'^nsXPCWrappedJSClass::',
+        r'^DefineSelfHostedProperty$',
         r'^JSFunction::',
         r'^JSObject::',
         r'^InternalCall$',
@@ -24,6 +37,9 @@ stack_condense_groups = [
         r'^xpc::',
         r'^NumberFormat$',
         r'^LegacyIntlInitialize$',
+    ]),
+    ('(unsymbolicated)', [
+        r'<unsymbolicated>'
     ]),
 ]
 
@@ -227,6 +243,7 @@ def process_into_profile(data):
 
         last_stack = 0
         last_stack_condensed = False
+        last_lib_name = None
         for frame in reversed(stack):
             cpp_match = (
                 re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
@@ -250,10 +267,11 @@ def process_into_profile(data):
                 if condensed:
                     break
 
-            if condensed and last_stack_condensed:
+            if condensed and last_stack_condensed and last_lib_name == lib_name:
                 continue
 
             last_stack_condensed = condensed
+            last_lib_name = lib_name
             last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
 
         date = dates.key_to_item(build_date)
