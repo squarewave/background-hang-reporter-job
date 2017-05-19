@@ -153,6 +153,7 @@ def get_default_thread(name):
     }))
 
     stack_table.key_to_index({'name': '(root)', 'lib': None, 'prefix': None})
+    pseudo_stack_table.key_to_index({'name': '(root)', 'prefix': None})
 
     global tid
     global pid
