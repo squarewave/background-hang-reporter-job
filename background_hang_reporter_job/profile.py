@@ -283,7 +283,7 @@ def process_into_profile(data):
         date['stackHangCount'][last_stack] += hang_count
 
         last_pseudo = 0
-        for frame in reversed(pseudo):
+        for frame in pseudo:
             last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
 
         stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
