@@ -52,6 +52,38 @@ def ping_is_valid(ping):
 
     return True
 
+def flatten_hangs(build_date, thread_hang):
+    if 'name' not in thread_hang:
+        return []
+
+    hangs = thread_hang['hangs']
+    if 'nativeStacks' in thread_hang:
+        hangs = [
+            {
+                'stack': x['stack'],
+                'nativeStack': {
+                    'memoryMap': thread_hang['nativeStacks']['memoryMap'],
+                    'stacks': [thread_hang['nativeStacks']['stacks'][x['nativeStack']]],
+                },
+                'histogram': x['histogram'],
+            }
+            for x in hangs
+            if 'nativeStack' in x
+        ]
+
+    return [
+        {
+            'build_date': build_date,
+            'thread_name': thread_hang['name'],
+            'hang': x
+        }
+        for x in hangs
+        if 'nativeStack' in x
+        and type(x['nativeStack']) is dict
+        and len(x['nativeStack']['stacks']) > 0
+        and len(x['nativeStack']['stacks'][0]) > 0
+    ]
+
 def only_hangs_of_type(ping):
     result = []
 
@@ -67,42 +99,11 @@ def only_hangs_of_type(ping):
                 continue
 
             for thread_hang in payload['threadHangStats']:
-                if 'name' not in thread_hang:
-                    continue
-
-                if len(thread_hang['hangs']) > 0:
-                    result = result + [
-                        {
-                            'build_date': build_date,
-                            'thread_name': thread_hang['name'],
-                            'hang': x
-                        }
-                        for x in thread_hang['hangs']
-                        if 'nativeStack' in x
-                        and type(x['nativeStack']) is dict
-                        and len(x['nativeStack']['stacks']) > 0
-                        and len(x['nativeStack']['stacks'][0]) > 0
-                    ]
+                result = result + flatten_hangs(build_date, thread_hang)
 
     if ping['payload/threadHangStats'] is not None:
         for thread_hang in ping['payload/threadHangStats']:
-            if 'name' not in thread_hang:
-                continue
-
-            if len(thread_hang['hangs']) > 0:
-                result = result + [
-                    {
-                        'build_date': build_date,
-                        'thread_name': thread_hang['name'],
-                        'hang': x
-                    }
-                    for x in thread_hang['hangs']
-                    if 'nativeStack' in x
-                    and type(x['nativeStack']) is dict
-                    # 'stacks' is always a one-length list. Make sure the first item isn't empty
-                    and len(x['nativeStack']['stacks']) > 0
-                    and len(x['nativeStack']['stacks'][0]) > 0
-                ]
+            result = result + flatten_hangs(build_date, thread_hang)
 
     return result
 
