@@ -140,7 +140,34 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
             symbolicated.append(format_frame(UNSYMBOLICATED, "unknown"))
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
-def map_to_hang_data(hang, processed_modules, usage_hours_by_date):
+def get_symbolicated_stack(hang, processed_modules, usage_hours_by_date):
+    build_date = hang['build_date']
+    usage_hours = usage_hours_by_date[build_date]
+
+    if usage_hours <= 0:
+        return None
+
+    memory_map = hang['hang']['nativeStack']['memoryMap']
+    native_stack = hang['hang']['nativeStack']['stacks'][0]
+    symbolicated, percent_symbolicated = symbolicate_stacks(memory_map, native_stack, processed_modules)
+
+    # We only want mostly-symbolicated stacks. Anything else is A) not useful
+    # information, and B) probably a local build, which could be hanging for
+    # much different reasons.
+    if percent_symbolicated < 0.8:
+        return None
+
+    return tuple(symbolicated)
+
+def get_pseudo_stack(hang, usage_hours_by_date):
+    build_date = hang['build_date']
+    usage_hours = usage_hours_by_date[build_date]
+
+    if usage_hours <= 0:
+        return None
+    return tuple(hang['hang']['stack'])
+
+def map_to_hang_data(hang, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids):
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
@@ -163,11 +190,27 @@ def map_to_hang_data(hang, processed_modules, usage_hours_by_date):
     if percent_symbolicated < 0.8:
         return None
 
-    key = (tuple(symbolicated), tuple(hang['hang']['stack']), hang['thread_name'], build_date)
+    key = (
+        symbolicated_stacks_to_ids[tuple(symbolicated)],
+        pseudo_stacks_to_ids[tuple(hang['hang']['stack'])],
+        hang['thread_name'],
+        build_date)
     return (key, {
         'hang_ms': float(hang_sum) / usage_hours,
         'hang_count': float(hang_count) / usage_hours,
     })
+
+def get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date):
+    return (hangs.map(lambda hang: get_symbolicated_stack(hang, processed_modules, usage_hours_by_date))
+        .filter(lambda hang: hang is not None)
+        .distinct()
+        .collect())
+
+def get_all_pseudo_stacks(hangs, usage_hours_by_date):
+    return (hangs.map(lambda hang: get_pseudo_stack(hang, usage_hours_by_date))
+        .filter(lambda hang: hang is not None)
+        .distinct()
+        .collect())
 
 def merge_hang_data(a, b):
     return {
@@ -175,8 +218,9 @@ def merge_hang_data(a, b):
         'hang_count': a['hang_count'] + b['hang_count'],
     }
 
-def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date):
-    return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date))
+def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids):
+    return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date,
+            symbolicated_stacks_to_ids, pseudo_stacks_to_ids))
         .filter(lambda hang: hang is not None)
         .reduceByKey(merge_hang_data)
         .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
@@ -268,9 +312,12 @@ def process_modules(stacks_by_module, config):
 def transform_pings(pings, config):
     print "Filtering to Windows pings..."
     windows_pings_only = pings.filter(windows_only).filter(ping_is_valid)
+    windows_pings_only.cache()
 
     print "Filtering to hangs with native stacks..."
     hangs = filter_for_hangs_of_type(windows_pings_only)
+    hangs.cache()
+
     print "Getting stacks by module..."
     stacks_by_module = get_stacks_by_module(hangs)
     print "Processing modules..."
@@ -278,9 +325,24 @@ def transform_pings(pings, config):
 
     print "Getting usage hours..."
     usage_hours_by_date = get_usage_hours_by_date(windows_pings_only)
+
+    print "Getting all symbolicated stacks..."
+    symbolicated_stacks = get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date)
+    symbolicated_stacks_to_ids = {stack: index for index, stack in enumerate(symbolicated_stacks)}
+
+    print "Getting all pseudo stacks..."
+    pseudo_stacks = get_all_pseudo_stacks(hangs, usage_hours_by_date)
+    pseudo_stacks_to_ids = {stack: index for index, stack in enumerate(pseudo_stacks)}
+
     print "Grouping stacks..."
-    result = get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date)
-    return result
+    result = get_grouped_sums_and_counts(hangs,
+        processed_modules, usage_hours_by_date,
+        symbolicated_stacks_to_ids, pseudo_stacks_to_ids)
+    return {
+        'grouped_sums_and_counts': result,
+        'symbolicated_stacks': symbolicated_stacks,
+        'pseudo_stacks': pseudo_stacks,
+    }
 
 def fetch_URL(url):
     result = False, ""

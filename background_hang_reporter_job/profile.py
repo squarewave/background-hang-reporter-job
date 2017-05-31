@@ -194,7 +194,11 @@ def process_thread(thread):
         'stringArray': thread['stringArray'].get_items(),
     }
 
-def process_into_profile(data):
+def process_into_profile(result_data):
+    data = result_data['grouped_sums_and_counts']
+    symbolicated_stacks = result_data['symbolicated_stacks']
+    pseudo_stacks = result_data['pseudo_stacks']
+
     thread_table = UniqueKeyedTable(get_default_thread)
     preprocessed_thread_table = UniqueKeyedTable(lambda key: {})
 
@@ -232,6 +236,9 @@ def process_into_profile(data):
     print "Preprocessing all stacks for profile..."
     for row in data:
         stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
+
+        stack = symbolicated_stacks[stack]
+        pseudo = pseudo_stacks[pseudo]
 
         if len(stack) >= 100:
             continue
