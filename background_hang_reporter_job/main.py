@@ -11,7 +11,6 @@ from bisect import bisect
 from boto3.s3.transfer import S3Transfer
 from datetime import datetime, timedelta
 from eventlet.green import urllib2
-from itertools import groupby
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 from sets import Set
@@ -220,13 +219,12 @@ def merge_hang_data(a, b):
     }
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids):
-    mapped = [
-        map_to_hang_data(hang, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids)
-        for hang in hangs
-    ]
-    filtered = [hang for hang in hangs if hang is not None]
-    reduced = [(key, reduce(merge_hang_data, group)) for key, group in groupby(filtered, key=itemgetter(0))]
-    return [hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']) for hang in reduced]
+    return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date,
+            symbolicated_stacks_to_ids, pseudo_stacks_to_ids))
+        .filter(lambda hang: hang is not None)
+        .reduceByKey(merge_hang_data)
+        .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
+        .collect())
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
@@ -318,6 +316,7 @@ def transform_pings(pings, config):
 
     print "Filtering to hangs with native stacks..."
     hangs = filter_for_hangs_of_type(windows_pings_only)
+    hangs.cache()
 
     print "Getting stacks by module..."
     stacks_by_module = get_stacks_by_module(hangs)
@@ -335,9 +334,8 @@ def transform_pings(pings, config):
     pseudo_stacks = get_all_pseudo_stacks(hangs, usage_hours_by_date)
     pseudo_stacks_to_ids = {stack: index for index, stack in enumerate(pseudo_stacks)}
 
-    hangs_collected = hangs.collect()
     print "Grouping stacks..."
-    result = get_grouped_sums_and_counts(hangs_collected,
+    result = get_grouped_sums_and_counts(hangs,
         processed_modules, usage_hours_by_date,
         symbolicated_stacks_to_ids, pseudo_stacks_to_ids)
     return {
@@ -431,16 +429,14 @@ def etl_job(sc, sqlContext, config=None):
         'days_to_aggregate': 30,
         'use_s3': True,
         'sample_size': 0.1,
-        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
-        'stacks_by_day_filename': 'stacks_by_day',
-        'hang_profile_filename': 'hang_profile',
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
     }
 
     if config is not None:
         final_config.update(config)
 
     results = transform_pings(get_data(sc, final_config), final_config)
-    write_file(final_config['stacks_by_day_filename'], results, final_config)
+    write_file('stacks_by_day', results, final_config)
 
     profile = process_into_profile(results)
-    write_file(final_config['stacks_by_day_filename'], profile, final_config)
+    write_file('hang_profile', profile, final_config)
