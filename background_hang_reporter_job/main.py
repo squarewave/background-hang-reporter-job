@@ -312,11 +312,9 @@ def process_modules(stacks_by_module, config):
 def transform_pings(pings, config):
     print "Filtering to Windows pings..."
     windows_pings_only = pings.filter(windows_only).filter(ping_is_valid)
-    windows_pings_only.cache()
 
     print "Filtering to hangs with native stacks..."
     hangs = filter_for_hangs_of_type(windows_pings_only)
-    hangs.cache()
 
     print "Getting stacks by module..."
     stacks_by_module = get_stacks_by_module(hangs)
