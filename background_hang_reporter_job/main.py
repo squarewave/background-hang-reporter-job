@@ -16,14 +16,14 @@ from moztelemetry.dataset import Dataset
 from sets import Set
 from StringIO import StringIO
 
-from profile import process_into_profile
+from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
 
-def get_data(sc, config):
-    start_date = (datetime.today() - timedelta(days=config['days_to_aggregate']))
+def get_data(sc, config, start_date_relative, end_date_relative):
+    start_date = (datetime.today() + timedelta(days=start_date_relative))
     start_date_str = start_date.strftime("%Y%m%d")
-    end_date = (datetime.today() - timedelta(days=0))
+    end_date = (datetime.today() + timedelta(days=end_date_relative))
     end_date_str = end_date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
@@ -435,8 +435,13 @@ def etl_job(sc, sqlContext, config=None):
     if config is not None:
         final_config.update(config)
 
-    results = transform_pings(get_data(sc, final_config), final_config)
-    write_file('stacks_by_day', results, final_config)
+    profile_processor = ProfileProcessor()
+    # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
+    # bit by bit to the profile processor and hope it can handle it.
+    for x in xrange(1, final_config['days_to_aggregate'] + 1):
+        transformed = transform_pings(get_data(sc, final_config, -x, -x), final_config)
+        print "Passing stacks to processor..."
+        profile_processor.ingest(transformed)
 
-    profile = process_into_profile(results)
+    profile = profile_processor.process_into_profile()
     write_file('hang_profile', profile, final_config)

@@ -5,44 +5,6 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
-stack_condense_groups = [
-    # TODO: this list is a work in progress
-    ('(script)', [
-        r'^js::',
-        r'^JS::',
-        r'^JS_',
-        r'^Compile$',
-        r'^BytecodeCompiler::',
-        r'^SharedStub$',
-        r'^DefinePropertyById$',
-        r'^DefineSelfHostedProperty$',
-        r'^mozJSComponentLoader::',
-        r'^XPCWrappedNative::',
-        r'^XPCWrappedNativeProto::',
-        r'^nsXPCWrappedJS::',
-        r'^nsXPCWrappedJSClass::',
-        r'^DefineSelfHostedProperty$',
-        r'^JSFunction::',
-        r'^JSObject::',
-        r'^InternalCall$',
-        r'^InternalConstruct$',
-        r'^GetNameOperation$',
-        r'^SetPropertyOperation$',
-        r'^Interpret$',
-        r'^XPC_WN_CallMethod',
-        r'^XPCWrappedNative::CallMethod',
-        r'^XPCConvert::',
-        r'^date_parse$',
-        r'^json_parse$',
-        r'^xpc::',
-        r'^NumberFormat$',
-        r'^LegacyIntlInitialize$',
-    ]),
-    ('(unsymbolicated)', [
-        r'<unsymbolicated>'
-    ]),
-]
-
 def to_struct_of_arrays(a):
     if len(a) == 0:
         raise Exception('Need at least one item in array for this to work.')
@@ -194,115 +156,73 @@ def process_thread(thread):
         'stringArray': thread['stringArray'].get_items(),
     }
 
-def process_into_profile(result_data):
-    data = result_data['grouped_sums_and_counts']
-    symbolicated_stacks = result_data['symbolicated_stacks']
-    pseudo_stacks = result_data['pseudo_stacks']
 
-    thread_table = UniqueKeyedTable(get_default_thread)
-    preprocessed_thread_table = UniqueKeyedTable(lambda key: {})
+class ProfileProcessor:
+    def __init__(self):
+        self.thread_table = UniqueKeyedTable(get_default_thread)
 
-    data = [
-        (list(stack), pseudo, thread_name, build_date, hang_ms, hang_count)
-        for stack, pseudo, thread_name, build_date, hang_ms, hang_count
-        in data
-    ]
+    def ingest(self, result_data):
+        data = result_data['grouped_sums_and_counts']
+        symbolicated_stacks = result_data['symbolicated_stacks']
+        pseudo_stacks = result_data['pseudo_stacks']
 
-    print "Preprocessing stacks for profile..."
-    for row in data:
-        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
-        frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
+        print "Preprocessing all stacks for profile..."
+        for row in data:
+            stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
-        last_frame = None
-        for i in xrange(0,len(stack) - 1):
-            frame_to_prefix[stack[i]] = stack[i + 1]
+            stack = symbolicated_stacks[stack]
+            pseudo = pseudo_stacks[pseudo]
 
-    for row in data:
-        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
-
-        if len(stack) == 25:
-            frame_to_prefix = preprocessed_thread_table.key_to_item(thread_name)
-            top_frame = stack[-1];
-
-            # cap out at stacks of length == 25 + 75
-            for i in xrange(0, 75):
-                if top_frame in frame_to_prefix:
-                    prefix = frame_to_prefix[top_frame]
-                    stack.append(prefix)
-                    top_frame = prefix
-                else:
-                    break
-
-    print "Preprocessing all stacks for profile..."
-    for row in data:
-        stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
-
-        stack = symbolicated_stacks[stack]
-        pseudo = pseudo_stacks[pseudo]
-
-        if len(stack) >= 100:
-            continue
-
-        thread = thread_table.key_to_item(thread_name)
-        stack_table = thread['stackTable']
-        pseudo_stack_table = thread['pseudoStackTable']
-        stack_to_pseudo_stacks_table = thread['stackToPseudoStacksTable']
-        dates = thread['dates']
-
-        last_stack = 0
-        last_stack_condensed = False
-        last_lib_name = None
-        for frame in reversed(stack):
-            cpp_match = (
-                re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
-                re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
-                re.search(r'^(.*) \(in ([^)]*)\)$', frame)
-            )
-            if cpp_match:
-                func_name = cpp_match.group(1);
-                lib_name = cpp_match.group(2);
-            else:
-                func_name = frame;
-                lib_name = 'unknown';
-
-            condensed = False
-            for condensed_name, patterns in stack_condense_groups:
-                for pattern in patterns:
-                    if re.search(pattern, func_name):
-                        condensed = True
-                        func_name = condensed_name
-                        break
-                if condensed:
-                    break
-
-            if condensed and last_stack_condensed and last_lib_name == lib_name:
+            if len(stack) >= 100:
                 continue
 
-            last_stack_condensed = condensed
-            last_lib_name = lib_name
-            last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+            thread = self.thread_table.key_to_item(thread_name)
+            stack_table = thread['stackTable']
+            pseudo_stack_table = thread['pseudoStackTable']
+            stack_to_pseudo_stacks_table = thread['stackToPseudoStacksTable']
+            dates = thread['dates']
 
-        date = dates.key_to_item(build_date)
-        if date['stackHangMs'][last_stack] is None:
-            date['stackHangMs'][last_stack] = 0.0
-            date['stackHangCount'][last_stack] = 0
+            last_stack = 0
+            last_lib_name = None
+            for frame in reversed(stack):
+                cpp_match = (
+                    re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
+                    re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
+                    re.search(r'^(.*) \(in ([^)]*)\)$', frame)
+                )
+                if cpp_match:
+                    func_name = cpp_match.group(1);
+                    lib_name = cpp_match.group(2);
+                else:
+                    func_name = frame;
+                    lib_name = 'unknown';
 
-        date['stackHangMs'][last_stack] += hang_ms
-        date['stackHangCount'][last_stack] += hang_count
+                last_lib_name = lib_name
+                last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
 
-        last_pseudo = 0
-        for frame in pseudo:
-            last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
+            date = dates.key_to_item(build_date)
+            if date['stackHangMs'][last_stack] is None:
+                date['stackHangMs'][last_stack] = 0.0
+                date['stackHangCount'][last_stack] = 0
 
-        stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
-            'stack': last_stack,
-            'pseudo_stack': last_pseudo
-        })
+            date['stackHangMs'][last_stack] += hang_ms
+            date['stackHangCount'][last_stack] += hang_count
 
-        stack_to_pseudo_stack['stackHangMs'] += hang_ms
-        stack_to_pseudo_stack['stackHangCount'] += hang_count
+            last_pseudo = 0
+            for frame in pseudo:
+                last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
 
-    print "Processing into final format..."
-    return {
-        'threads': [process_thread(t) for t in thread_table.get_items()],
-    }
+            stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
+                'stack': last_stack,
+                'pseudo_stack': last_pseudo
+            })
+
+            stack_to_pseudo_stack['stackHangMs'] += hang_ms
+            stack_to_pseudo_stack['stackHangCount'] += hang_count
+
+
+    def process_into_profile(self):
+        print "Processing into final format..."
+        return {
+            'threads': [process_thread(t) for t in self.thread_table.get_items()],
+        }
