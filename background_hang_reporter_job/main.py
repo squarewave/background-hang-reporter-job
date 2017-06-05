@@ -1,6 +1,7 @@
 import boto3
 import contextlib
 import eventlet
+import gc
 import gzip
 import os
 import pandas as pd
@@ -440,6 +441,9 @@ def etl_job(sc, sqlContext, config=None):
         transformed = transform_pings(get_data(sc, final_config, -x, -x), final_config)
         print "Passing stacks to processor..."
         profile_processor.ingest(transformed)
+        # Run a collection to ensure that any references to any RDDs are cleaned up,
+        # allowing the JVM to clean them up on its end.
+        gc.collect()
 
     profile = profile_processor.process_into_profile()
     write_file('hang_profile', profile, final_config)
