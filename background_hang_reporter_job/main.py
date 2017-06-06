@@ -5,6 +5,7 @@ import gc
 import gzip
 import os
 import pandas as pd
+import sys
 import ujson as json
 import urllib
 
@@ -425,10 +426,11 @@ def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {
-        'days_to_aggregate': 30,
+        'days_to_aggregate': 25,
         'use_s3': True,
-        'sample_size': 0.1,
-        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/"
+        'sample_size': 0.05,
+        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
+        'hang_profile_filename': 'hang_profile',
     }
 
     if config is not None:
@@ -445,5 +447,7 @@ def etl_job(sc, sqlContext, config=None):
         # allowing the JVM to clean them up on its end.
         gc.collect()
 
+        print sys.getsizeof(profile_processor)
+
     profile = profile_processor.process_into_profile()
-    write_file('hang_profile', profile, final_config)
+    write_file(final_config['hang_profile_filename'], profile, final_config)
