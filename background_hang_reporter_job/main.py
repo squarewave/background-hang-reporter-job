@@ -279,6 +279,20 @@ def get_file_URL(module, config):
         urllib.quote_plus(file_name)
     ])
 
+sym_map_cache = {}
+def fetch_and_process_symbols_URL(url):
+    global sym_map_cache
+    if url not in sym_map_cache:
+        success, response = fetch_URL(url)
+
+        if success:
+            sorted_keys, sym_map = make_sym_map(response)
+            sym_map_cache[url] = (True, sorted_keys, sym_map)
+        else:
+            sym_map_cache[url] = (False, None, None)
+
+    return sym_map_cache[url]
+
 def process_modules(stacks_by_module, config):
     stack_dict = {}
 
@@ -290,12 +304,10 @@ def process_modules(stacks_by_module, config):
 
     print "({} distinct module URLs)".format(len(file_URLs))
 
-    for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
+    for (success, sorted_keys, sym_map), (module, offsets) in zip(pool.imap(fetch_and_process_symbols_URL, file_URLs), stacks_by_module.iteritems()):
         module_name, breakpad_id = module
 
         if success:
-            sorted_keys, sym_map = make_sym_map(response)
-
             for offset in offsets:
                 i = bisect(sorted_keys, offset)
                 key = sorted_keys[i - 1] if i else None
