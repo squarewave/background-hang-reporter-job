@@ -428,9 +428,9 @@ def etl_job(sc, sqlContext, config=None):
     final_config = {
         'days_to_aggregate': 15,
         'use_s3': True,
-        'sample_size': 0.02,
+        'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
-        'hang_profile_filename': 'hang_profile',
+        'hang_profile_filename': 'hang_profile_2',
     }
 
     if config is not None:

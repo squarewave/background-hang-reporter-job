@@ -5,6 +5,8 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
+STACK_ACCEPTANCE_THRESHOLD = 0.001
+
 def to_struct_of_arrays(a):
     if len(a) == 0:
         raise Exception('Need at least one item in array for this to work.')
@@ -166,15 +168,43 @@ class ProfileProcessor:
         symbolicated_stacks = result_data['symbolicated_stacks']
         pseudo_stacks = result_data['pseudo_stacks']
 
+        prune_stack_cache = UniqueKeyedTable(lambda key: {
+            'totalStackHangMs': 0.0
+        })
+        root_stack = prune_stack_cache.key_to_item({'name': '(root)', 'lib': None, 'prefix': None})
+
+        print "Preprocessing stacks for prune cache..."
+        for row in data:
+            stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
+
+            stack = symbolicated_stacks[stack]
+
+            root_stack['totalStackHangMs'] += hang_ms
+
+            last_stack = 0
+            for frame in reversed(stack):
+                cpp_match = (
+                    re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
+                    re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
+                    re.search(r'^(.*) \(in ([^)]*)\)$', frame)
+                )
+                if cpp_match:
+                    func_name = cpp_match.group(1);
+                    lib_name = cpp_match.group(2);
+                else:
+                    func_name = frame;
+                    lib_name = 'unknown';
+
+                cache_item = prune_stack_cache.key_to_item({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                last_stack = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                cache_item['totalStackHangMs'] += hang_ms
+
         print "Preprocessing all stacks for profile..."
         for row in data:
             stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
             stack = symbolicated_stacks[stack]
             pseudo = pseudo_stacks[pseudo]
-
-            if len(stack) >= 100:
-                continue
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
@@ -183,6 +213,7 @@ class ProfileProcessor:
             dates = thread['dates']
 
             last_stack = 0
+            last_cache_item = root_stack
             last_lib_name = None
             for frame in reversed(stack):
                 cpp_match = (
@@ -197,8 +228,13 @@ class ProfileProcessor:
                     func_name = frame;
                     lib_name = 'unknown';
 
-                last_lib_name = lib_name
-                last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                cache_item = prune_stack_cache.key_to_item({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                if cache_item['totalStackHangMs'] / last_cache_item['totalStackHangMs'] > STACK_ACCEPTANCE_THRESHOLD:
+                    last_lib_name = lib_name
+                    last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                    last_cache_item = cache_item
+                else:
+                    break
 
             date = dates.key_to_item(build_date)
             if date['stackHangMs'][last_stack] is None:
