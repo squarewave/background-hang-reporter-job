@@ -160,8 +160,13 @@ def process_thread(thread):
 
 
 class ProfileProcessor:
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self.thread_table = UniqueKeyedTable(get_default_thread)
+
+    def debugDump(self, str):
+        if self.config['print_debug_info']:
+            print str
 
     def ingest(self, result_data):
         data = result_data['grouped_sums_and_counts']
@@ -199,7 +204,7 @@ class ProfileProcessor:
                 last_stack = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
                 cache_item['totalStackHangMs'] += hang_ms
 
-        print "Preprocessing all stacks for profile..."
+        print "Processing stacks..."
         for row in data:
             stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
 
@@ -234,6 +239,8 @@ class ProfileProcessor:
                     last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
                     last_cache_item = cache_item
                 else:
+                    self.debugDump("Stripping stack {} - {} / {}".format(func_name,
+                        cache_item['totalStackHangMs'], last_cache_item['totalStackHangMs']))
                     break
 
             date = dates.key_to_item(build_date)

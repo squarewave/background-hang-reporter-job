@@ -431,12 +431,13 @@ def etl_job(sc, sqlContext, config=None):
         'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
         'hang_profile_filename': 'hang_profile_2',
+        'print_debug_info': False
     }
 
     if config is not None:
         final_config.update(config)
 
-    profile_processor = ProfileProcessor()
+    profile_processor = ProfileProcessor(final_config)
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(1, final_config['days_to_aggregate'] + 1):
