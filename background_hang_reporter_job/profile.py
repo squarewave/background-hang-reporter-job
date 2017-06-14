@@ -35,7 +35,7 @@ class UniqueKeyedTable:
         return self.items[self.key_to_index(key)]
 
     def index_to_item(self, index):
-        self.items[index]
+        return self.items[index]
 
     def get_items(self):
         return self.items
@@ -218,7 +218,7 @@ class ProfileProcessor:
             dates = thread['dates']
 
             last_stack = 0
-            last_cache_item = root_stack
+            last_cache_item_index = 0
             last_lib_name = None
             for frame in reversed(stack):
                 cpp_match = (
@@ -233,11 +233,13 @@ class ProfileProcessor:
                     func_name = frame;
                     lib_name = 'unknown';
 
-                cache_item = prune_stack_cache.key_to_item({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                cache_item_index = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_cache_item_index})
+                cache_item = prune_stack_cache.index_to_item(cache_item_index)
+                last_cache_item = prune_stack_cache.index_to_item(last_cache_item_index)
                 if cache_item['totalStackHangMs'] / last_cache_item['totalStackHangMs'] > STACK_ACCEPTANCE_THRESHOLD:
                     last_lib_name = lib_name
                     last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
-                    last_cache_item = cache_item
+                    last_cache_item_index = cache_item_index
                 else:
                     self.debugDump("Stripping stack {} - {} / {}".format(func_name,
                         cache_item['totalStackHangMs'], last_cache_item['totalStackHangMs']))
