@@ -431,7 +431,8 @@ def etl_job(sc, sqlContext, config=None):
         'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
         'hang_profile_filename': 'hang_profile_2',
-        'print_debug_info': False
+        'print_debug_info': False,
+        'stack_acceptance_threshold': 0.001,
     }
 
     if config is not None:

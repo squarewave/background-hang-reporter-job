@@ -5,8 +5,6 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
-STACK_ACCEPTANCE_THRESHOLD = 0.01
-
 def to_struct_of_arrays(a):
     if len(a) == 0:
         raise Exception('Need at least one item in array for this to work.')
@@ -235,14 +233,13 @@ class ProfileProcessor:
 
                 cache_item_index = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_cache_item_index})
                 cache_item = prune_stack_cache.index_to_item(cache_item_index)
-                last_cache_item = prune_stack_cache.index_to_item(last_cache_item_index)
-                if cache_item['totalStackHangMs'] / last_cache_item['totalStackHangMs'] > STACK_ACCEPTANCE_THRESHOLD:
+                if cache_item['totalStackHangMs'] / root_stack['totalStackHangMs'] > self.config['stack_acceptance_threshold']:
                     last_lib_name = lib_name
                     last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
                     last_cache_item_index = cache_item_index
                 else:
                     self.debugDump("Stripping stack {} - {} / {}".format(func_name,
-                        cache_item['totalStackHangMs'], last_cache_item['totalStackHangMs']))
+                        cache_item['totalStackHangMs'], root_stack['totalStackHangMs']))
                     break
 
             date = dates.key_to_item(build_date)
