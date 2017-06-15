@@ -5,7 +5,7 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
-STACK_ACCEPTANCE_THRESHOLD = 0.001
+STACK_ACCEPTANCE_THRESHOLD = 0.01
 
 def to_struct_of_arrays(a):
     if len(a) == 0:
