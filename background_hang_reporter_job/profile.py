@@ -130,7 +130,7 @@ def get_default_thread(name):
         'pseudoStackTable': pseudo_stack_table,
         'stackToPseudoStacksTable': stack_to_pseudo_stacks_table,
         'stringArray': strings_table,
-        'processType': 'default',
+        'processType': 'tab' if name == 'Gecko_Child' or name == 'Gecko_Child_ForcePaint' else 'default',
         'tid': tid,
         'pid': pid,
         'time': 0.0,
