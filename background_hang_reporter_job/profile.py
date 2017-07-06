@@ -185,7 +185,7 @@ class ProfileProcessor:
             root_stack['totalStackHangMs'] += hang_ms
 
             last_stack = 0
-            for frame in reversed(stack):
+            for frame in stack:
                 cpp_match = (
                     re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
                     re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
@@ -218,7 +218,7 @@ class ProfileProcessor:
             last_stack = 0
             last_cache_item_index = 0
             last_lib_name = None
-            for frame in reversed(stack):
+            for frame in stack:
                 cpp_match = (
                     re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
                     re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
