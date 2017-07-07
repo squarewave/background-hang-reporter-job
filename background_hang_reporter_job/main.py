@@ -169,13 +169,16 @@ def get_pseudo_stack(hang, usage_hours_by_date):
         return None
     return tuple(hang['hang']['stack'])
 
-def map_to_hang_data(hang, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids):
+def map_to_hang_data(hang, processed_modules, usage_hours_by_date,
+                     symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config):
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
     weights = pd.Series(key_ints, index=key_ints)
-    hang_sum = (hist * weights)[hist.index >= 100].sum()
-    hang_count = hist[hist.index >= 100].sum()
+    minned_sum = (hist * weights)[hist.index >= config['hang_lower_bound']]
+    hang_sum = minned_sum[minned_sum.index < config['hang_upper_bound']].sum()
+    minned = hist[hist.index >= config['hang_lower_bound']]
+    hang_count = minned[minned.index < config['hang_upper_bound']].sum()
     build_date = hang['build_date']
     usage_hours = usage_hours_by_date[build_date]
 
@@ -220,9 +223,11 @@ def merge_hang_data(a, b):
         'hang_count': a['hang_count'] + b['hang_count'],
     }
 
-def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids):
+def get_grouped_sums_and_counts(hangs, processed_modules,
+                                usage_hours_by_date, symbolicated_stacks_to_ids,
+                                pseudo_stacks_to_ids, config):
     return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date,
-            symbolicated_stacks_to_ids, pseudo_stacks_to_ids))
+            symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config))
         .filter(lambda hang: hang is not None)
         .reduceByKey(merge_hang_data)
         .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
@@ -337,7 +342,7 @@ def transform_pings(pings, config):
     print "Grouping stacks..."
     result = get_grouped_sums_and_counts(hangs,
         processed_modules, usage_hours_by_date,
-        symbolicated_stacks_to_ids, pseudo_stacks_to_ids)
+        symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config)
     return {
         'grouped_sums_and_counts': result,
         'symbolicated_stacks': symbolicated_stacks,
@@ -430,8 +435,10 @@ def etl_job(sc, sqlContext, config=None):
         'use_s3': True,
         'sample_size': 0.02,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
-        'hang_profile_filename': 'hang_profile_2',
+        'hang_profile_filename': 'hang_profile_128_16000',
         'print_debug_info': False,
+        'hang_lower_bound': 128,
+        'hang_upper_bound': 16000,
         'stack_acceptance_threshold': 0.0001,
     }
 
