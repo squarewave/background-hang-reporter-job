@@ -103,6 +103,10 @@ def get_default_thread(name):
         'prefix': key['prefix'],
         'func': func_table.key_to_index({'name': key['name'], 'lib': key['lib']}),
     }))
+    sample_table = UniqueKeyedTable(lambda key: ({
+        'stack': key['stack'],
+        'runnable': strings_table.key_to_index(key['runnable']),
+    }))
     pseudo_stack_table = UniqueKeyedTable(lambda key: ({
         'prefix': key['prefix'],
         'func': func_table.key_to_index({'name': key['name'], 'lib': None}),
@@ -127,6 +131,7 @@ def get_default_thread(name):
         'libs': libs,
         'funcTable': func_table,
         'stackTable': stack_table,
+        'sampleTable': sample_table,
         'pseudoStackTable': pseudo_stack_table,
         'stackToPseudoStacksTable': stack_to_pseudo_stacks_table,
         'stringArray': strings_table,
@@ -136,8 +141,8 @@ def get_default_thread(name):
         'time': 0.0,
         'dates': UniqueKeyedTable(lambda date: ({
             'date': date,
-            'stackHangMs': GrowToFitList(),
-            'stackHangCount': GrowToFitList()
+            'sampleHangMs': GrowToFitList(),
+            'sampleHangCount': GrowToFitList()
         })),
     }
 
@@ -150,6 +155,7 @@ def process_thread(thread):
         'libs': thread['libs'].get_items(),
         'funcTable': thread['funcTable'].struct_of_arrays(),
         'stackTable': thread['stackTable'].struct_of_arrays(),
+        'sampleTable': thread['sampleTable'].struct_of_arrays(),
         'pseudoStackTable': thread['pseudoStackTable'].struct_of_arrays(),
         'stackToPseudoStacksTable': thread['stackToPseudoStacksTable'].sorted_struct_of_arrays(lambda r: r['stack']),
         'dates': thread['dates'].get_items(),
@@ -178,7 +184,7 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
 
             stack = symbolicated_stacks[stack]
 
@@ -198,19 +204,28 @@ class ProfileProcessor:
                     func_name = frame;
                     lib_name = 'unknown';
 
-                cache_item = prune_stack_cache.key_to_item({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
-                last_stack = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                cache_item = prune_stack_cache.key_to_item({
+                    'name': func_name,
+                    'lib': lib_name,
+                    'prefix': last_stack
+                })
+                last_stack = prune_stack_cache.key_to_index({
+                    'name': func_name,
+                    'lib': lib_name,
+                    'prefix': last_stack
+                })
                 cache_item['totalStackHangMs'] += hang_ms
 
         print "Processing stacks..."
         for row in data:
-            stack, pseudo, thread_name, build_date, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
 
             stack = symbolicated_stacks[stack]
             pseudo = pseudo_stacks[pseudo]
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
+            sample_table = thread['sampleTable']
             pseudo_stack_table = thread['pseudoStackTable']
             stack_to_pseudo_stacks_table = thread['stackToPseudoStacksTable']
             dates = thread['dates']
@@ -231,24 +246,33 @@ class ProfileProcessor:
                     func_name = frame;
                     lib_name = 'unknown';
 
-                cache_item_index = prune_stack_cache.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_cache_item_index})
+                cache_item_index = prune_stack_cache.key_to_index({
+                    'name': func_name,
+                    'lib': lib_name,
+                    'prefix': last_cache_item_index})
                 cache_item = prune_stack_cache.index_to_item(cache_item_index)
                 if cache_item['totalStackHangMs'] / root_stack['totalStackHangMs'] > self.config['stack_acceptance_threshold']:
                     last_lib_name = lib_name
-                    last_stack = stack_table.key_to_index({'name': func_name, 'lib': lib_name, 'prefix': last_stack})
+                    last_stack = stack_table.key_to_index({
+                        'name': func_name,
+                        'lib': lib_name,
+                        'prefix': last_stack
+                    })
                     last_cache_item_index = cache_item_index
                 else:
                     self.debugDump("Stripping stack {} - {} / {}".format(func_name,
                         cache_item['totalStackHangMs'], root_stack['totalStackHangMs']))
                     break
 
-            date = dates.key_to_item(build_date)
-            if date['stackHangMs'][last_stack] is None:
-                date['stackHangMs'][last_stack] = 0.0
-                date['stackHangCount'][last_stack] = 0
+            sample_index = sample_table.key_to_index({'stack': last_stack, 'runnable': runnable_name})
 
-            date['stackHangMs'][last_stack] += hang_ms
-            date['stackHangCount'][last_stack] += hang_count
+            date = dates.key_to_item(build_date)
+            if date['sampleHangMs'][sample_index] is None:
+                date['sampleHangMs'][sample_index] = 0.0
+                date['sampleHangCount'][sample_index] = 0
+
+            date['sampleHangMs'][sample_index] += hang_ms
+            date['sampleHangCount'][sample_index] += hang_count
 
             last_pseudo = 0
             for frame in pseudo:
@@ -261,7 +285,6 @@ class ProfileProcessor:
 
             stack_to_pseudo_stack['stackHangMs'] += hang_ms
             stack_to_pseudo_stack['stackHangCount'] += hang_count
-
 
     def process_into_profile(self):
         print "Processing into final format..."

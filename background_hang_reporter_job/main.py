@@ -77,6 +77,7 @@ def flatten_hangs(build_date, thread_hang):
         {
             'build_date': build_date,
             'thread_name': thread_hang['name'],
+            'runnable_name': thread_hang['runnableName'] if 'runnableName' in thread_hang else '---',
             'hang': x
         }
         for x in hangs
@@ -198,6 +199,7 @@ def map_to_hang_data(hang, processed_modules, usage_hours_by_date,
     key = (
         symbolicated_stacks_to_ids[tuple(symbolicated)],
         pseudo_stacks_to_ids[tuple(hang['hang']['stack'])],
+        hang['runnable_name'],
         hang['thread_name'],
         build_date)
     return (key, {
