@@ -237,7 +237,7 @@ def get_grouped_sums_and_counts(hangs, processed_modules,
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
-    usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
+    usage_hours = float(ping['payload/info/subsessionLength']) / 60.0 / 60.0
     return (build_date, usage_hours)
 
 def merge_usage_hours(a, b):
