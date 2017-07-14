@@ -21,7 +21,7 @@ from StringIO import StringIO
 from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
-REDUCE_BY_KEY_PARALLELISM = 256
+REDUCE_BY_KEY_PARALLELISM = 512
 
 def get_data(sc, config, start_date_relative, end_date_relative):
     start_date = (datetime.today() + timedelta(days=start_date_relative))
@@ -142,7 +142,7 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
             else:
                 symbolicated.append(format_frame(UNSYMBOLICATED, debug_name))
         else:
-            symbolicated.append(format_frame(UNSYMBOLICATED, "unknown"))
+            symbolicated.append(format_frame(UNSYMBOLICATED, 'unknown'))
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
 def get_symbolicated_stack(hang, processed_modules, usage_hours_by_date):
@@ -204,10 +204,10 @@ def map_to_hang_data(hang, processed_modules, usage_hours_by_date,
         hang['runnable_name'],
         hang['thread_name'],
         build_date)
-    return (key, {
-        'hang_ms': float(hang_sum) / usage_hours,
-        'hang_count': float(hang_count) / usage_hours,
-    })
+    return (key, (
+        float(hang_sum) / usage_hours,
+        float(hang_count) / usage_hours,
+    ))
 
 def get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date):
     return (hangs.map(lambda hang: get_symbolicated_stack(hang, processed_modules, usage_hours_by_date))
@@ -222,10 +222,10 @@ def get_all_pseudo_stacks(hangs, usage_hours_by_date):
         .collect())
 
 def merge_hang_data(a, b):
-    return {
-        'hang_ms': a['hang_ms'] + b['hang_ms'],
-        'hang_count': a['hang_count'] + b['hang_count'],
-    }
+    return (
+        a[0] + b[0],
+        a[1] + b[1],
+    )
 
 def get_grouped_sums_and_counts(hangs, processed_modules,
                                 usage_hours_by_date, symbolicated_stacks_to_ids,
@@ -234,7 +234,7 @@ def get_grouped_sums_and_counts(hangs, processed_modules,
             symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config))
         .filter(lambda hang: hang is not None)
         .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
-        .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
+        .map(lambda hang: hang[0] + hang[1])
         .collect())
 
 def get_usage_hours(ping):
@@ -454,7 +454,7 @@ def etl_job(sc, sqlContext, config=None):
     profile_processor = ProfileProcessor(final_config)
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
-    for x in xrange(1, final_config['days_to_aggregate'] + 1):
+    for x in xrange(2, final_config['days_to_aggregate'] + 2):
         transformed = transform_pings(get_data(sc, final_config, -x, -x), final_config)
         print "Passing stacks to processor..."
         profile_processor.ingest(transformed)
