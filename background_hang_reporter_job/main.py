@@ -230,12 +230,21 @@ def merge_hang_data(a, b):
 def get_grouped_sums_and_counts(hangs, processed_modules,
                                 usage_hours_by_date, symbolicated_stacks_to_ids,
                                 pseudo_stacks_to_ids, config):
-    return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date,
-            symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config))
-        .filter(lambda hang: hang is not None)
-        .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
-        .map(lambda hang: hang[0] + hang[1])
-        .collect())
+    collected = hangs.collect()
+    unfiltered = [
+        map_to_hang_data(hang, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config)
+        for hang in collected
+    ]
+    filtered = [
+        hang for hang in unfiltered if hang is not None
+    ]
+    reduced = {}
+    for k, v in filtered:
+        if k not in reduced:
+            reduced[k] = v
+        else:
+            reduced[k] = merge_hang_data(reduced[k], v)
+    return {k + v for k, v in reduced.iteritems()}
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
