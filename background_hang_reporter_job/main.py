@@ -21,6 +21,7 @@ from StringIO import StringIO
 from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
+REDUCE_BY_KEY_PARALLELISM = 256
 
 def get_data(sc, config, start_date_relative, end_date_relative):
     start_date = (datetime.today() + timedelta(days=start_date_relative))
@@ -125,7 +126,8 @@ def get_stacks_by_module(hangs):
     return (hangs.flatMap(map_to_frame_info)
         .filter(lambda hang_tuple: hang_tuple[0] is not None)
         .distinct()
-        .reduceByKey(lambda a,b: a + b).collectAsMap())
+        .reduceByKey(lambda a,b: a + b, REDUCE_BY_KEY_PARALLELISM)
+        .collectAsMap())
 
 def symbolicate_stacks(memory_map, stack, processed_modules):
     symbolicated = []
@@ -231,7 +233,7 @@ def get_grouped_sums_and_counts(hangs, processed_modules,
     return (hangs.map(lambda hang: map_to_hang_data(hang, processed_modules, usage_hours_by_date,
             symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config))
         .filter(lambda hang: hang is not None)
-        .reduceByKey(merge_hang_data)
+        .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
         .map(lambda hang: hang[0] + (hang[1]['hang_ms'], hang[1]['hang_count']))
         .collect())
 
@@ -244,7 +246,9 @@ def merge_usage_hours(a, b):
     return a + b
 
 def get_usage_hours_by_date(pings):
-    return pings.map(get_usage_hours).reduceByKey(merge_usage_hours).collectAsMap()
+    return (pings.map(get_usage_hours)
+        .reduceByKey(merge_usage_hours, REDUCE_BY_KEY_PARALLELISM)
+        .collectAsMap())
 
 def make_sym_map(data):
     public_symbols = {}
