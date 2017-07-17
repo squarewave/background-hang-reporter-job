@@ -172,8 +172,7 @@ def get_pseudo_stack(hang, usage_hours_by_date):
         return None
     return tuple(hang['hang']['stack'])
 
-def map_to_hang_data(hang, processed_modules, usage_hours_by_date,
-                     symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config):
+def map_to_hang_data(hang, config):
     hist_data = hang['hang']['histogram']['values']
     key_ints = map(int, hist_data.keys())
     hist = pd.Series(hist_data.values(), index=key_ints)
@@ -183,30 +182,19 @@ def map_to_hang_data(hang, processed_modules, usage_hours_by_date,
     minned = hist[hist.index >= config['hang_lower_bound']]
     hang_count = minned[minned.index < config['hang_upper_bound']].sum()
     build_date = hang['build_date']
-    usage_hours = usage_hours_by_date[build_date]
-
-    if usage_hours <= 0:
-        return None
-
     memory_map = hang['hang']['nativeStack']['memoryMap']
     native_stack = hang['hang']['nativeStack']['stacks'][0]
-    symbolicated, percent_symbolicated = symbolicate_stacks(memory_map, native_stack, processed_modules)
-
-    # We only want mostly-symbolicated stacks. Anything else is A) not useful
-    # information, and B) probably a local build, which could be hanging for
-    # much different reasons.
-    if percent_symbolicated < 0.8:
-        return None
 
     key = (
-        symbolicated_stacks_to_ids[tuple(symbolicated)],
-        pseudo_stacks_to_ids[tuple(hang['hang']['stack'])],
+        tuple((a,b) for a,b in native_stack),
+        tuple((a,b) for a,b in memory_map),
+        tuple(hang['hang']['stack']),
         hang['runnable_name'],
         hang['thread_name'],
         build_date)
     return (key, (
-        float(hang_sum) / usage_hours,
-        float(hang_count) / usage_hours,
+        float(hang_sum),
+        float(hang_count),
     ))
 
 def get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date):
@@ -227,24 +215,40 @@ def merge_hang_data(a, b):
         a[1] + b[1],
     )
 
-def get_grouped_sums_and_counts(hangs, processed_modules,
-                                usage_hours_by_date, symbolicated_stacks_to_ids,
-                                pseudo_stacks_to_ids, config):
-    collected = hangs.collect()
-    unfiltered = [
-        map_to_hang_data(hang, processed_modules, usage_hours_by_date, symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config)
-        for hang in collected
+def process_hang_key(key, processed_modules):
+    symbolicated, percent_symbolicated = symbolicate_stacks(key[1], key[0], processed_modules)
+
+    # We only want mostly-symbolicated stacks. Anything else is A) not useful
+    # information, and B) probably a local build, which could be hanging for
+    # much different reasons.
+    if percent_symbolicated < 0.8:
+        return None
+
+    return (
+        tuple(symbolicated),
+        key[2],
+        key[3],
+        key[4],
+        key[5],
+    )
+
+def process_hang_value(key, val, usage_hours_by_date):
+    usage_hours = usage_hours_by_date[key[5]]
+    return (val[0] / usage_hours, val[1] / usage_hours)
+
+def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
+    reduced = (hangs
+        .map(lambda hang: map_to_hang_data(hang, config))
+        .filter(lambda hang: hang is not None)
+        .reduceByKey(merge_hang_data)
+        .collect())
+    items = [
+        (process_hang_key(k, processed_modules), process_hang_value(k, v, usage_hours_by_date))
+        for k, v in reduced
     ]
-    filtered = [
-        hang for hang in unfiltered if hang is not None
+    return [
+        k + v for k, v in items if k is not None
     ]
-    reduced = {}
-    for k, v in filtered:
-        if k not in reduced:
-            reduced[k] = v
-        else:
-            reduced[k] = merge_hang_data(reduced[k], v)
-    return {k + v for k, v in reduced.iteritems()}
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
@@ -346,23 +350,10 @@ def transform_pings(pings, config):
     print "Getting usage hours..."
     usage_hours_by_date = get_usage_hours_by_date(windows_pings_only)
 
-    print "Getting all symbolicated stacks..."
-    symbolicated_stacks = get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date)
-    symbolicated_stacks_to_ids = {stack: index for index, stack in enumerate(symbolicated_stacks)}
-
-    print "Getting all pseudo stacks..."
-    pseudo_stacks = get_all_pseudo_stacks(hangs, usage_hours_by_date)
-    pseudo_stacks_to_ids = {stack: index for index, stack in enumerate(pseudo_stacks)}
-
     print "Grouping stacks..."
     result = get_grouped_sums_and_counts(hangs,
-        processed_modules, usage_hours_by_date,
-        symbolicated_stacks_to_ids, pseudo_stacks_to_ids, config)
-    return {
-        'grouped_sums_and_counts': result,
-        'symbolicated_stacks': symbolicated_stacks,
-        'pseudo_stacks': pseudo_stacks,
-    }
+        processed_modules, usage_hours_by_date, config)
+    return result
 
 def fetch_URL(url):
     result = False, ""

@@ -172,10 +172,7 @@ class ProfileProcessor:
         if self.config['print_debug_info']:
             print str
 
-    def ingest(self, result_data):
-        data = result_data['grouped_sums_and_counts']
-        symbolicated_stacks = result_data['symbolicated_stacks']
-        pseudo_stacks = result_data['pseudo_stacks']
+    def ingest(self, data):
 
         prune_stack_cache = UniqueKeyedTable(lambda key: {
             'totalStackHangMs': 0.0
@@ -185,8 +182,6 @@ class ProfileProcessor:
         print "Preprocessing stacks for prune cache..."
         for row in data:
             stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
-
-            stack = symbolicated_stacks[stack]
 
             root_stack['totalStackHangMs'] += hang_ms
 
@@ -219,9 +214,6 @@ class ProfileProcessor:
         print "Processing stacks..."
         for row in data:
             stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
-
-            stack = symbolicated_stacks[stack]
-            pseudo = pseudo_stacks[pseudo]
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
