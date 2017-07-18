@@ -317,7 +317,6 @@ class ThreadFetchSymbolData(threading.Thread):
                 module = self.queue.get(False)
                 file_URL = get_file_URL(module, self.config)
                 success, response = fetch_URL(file_URL)
-                print "Fetched!"
                 self.result_dict[module] = (success, response)
             except Queue.Empty:
                 return
