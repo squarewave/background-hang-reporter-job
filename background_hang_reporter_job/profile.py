@@ -177,8 +177,8 @@ class ProfileProcessor:
         data = [
             x
             for x in data
-            # x[5] should be hang_ms
-            if x[5] > 0.0
+            # x[6] should be hang_ms
+            if x[6] > 0.0
         ]
         print "{} filtered samples in data".format(len(data))
 
@@ -189,7 +189,7 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count, user_interacting = row
+            stack, pseudo, runnable_name, thread_name, build_date, user_interacting, hang_ms, hang_count = row
 
             root_stack['totalStackHangMs'] += hang_ms
 
@@ -221,7 +221,7 @@ class ProfileProcessor:
 
         print "Processing stacks..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count, user_interacting = row
+            stack, pseudo, runnable_name, thread_name, build_date, user_interacting, hang_ms, hang_count = row
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']

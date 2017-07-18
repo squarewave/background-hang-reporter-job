@@ -356,7 +356,7 @@ def fetch_module_data(stacks_by_module, config):
     queue.join()
     return symbol_data
 
-def process_fetched_module_data(stacks_by_module, symbol_data)
+def process_fetched_module_data(stacks_by_module, symbol_data):
     stack_dict = {}
     for module, offsets in stacks_by_module.iteritems():
         module_name, breakpad_id = module
