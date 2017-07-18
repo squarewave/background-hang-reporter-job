@@ -106,6 +106,7 @@ def get_default_thread(name):
     sample_table = UniqueKeyedTable(lambda key: ({
         'stack': key['stack'],
         'runnable': strings_table.key_to_index(key['runnable']),
+        'userInteracting': key['userInteracting'],
     }))
     pseudo_stack_table = UniqueKeyedTable(lambda key: ({
         'prefix': key['prefix'],
@@ -181,7 +182,7 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count, user_interacting = row
 
             root_stack['totalStackHangMs'] += hang_ms
 
@@ -213,7 +214,7 @@ class ProfileProcessor:
 
         print "Processing stacks..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, build_date, hang_ms, hang_count, user_interacting = row
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
@@ -256,7 +257,11 @@ class ProfileProcessor:
                         cache_item['totalStackHangMs'], root_stack['totalStackHangMs']))
                     break
 
-            sample_index = sample_table.key_to_index({'stack': last_stack, 'runnable': runnable_name})
+            sample_index = sample_table.key_to_index({
+                'stack': last_stack,
+                'runnable': runnable_name,
+                'userInteracting': user_interacting
+            })
 
             date = dates.key_to_item(build_date)
             if date['sampleHangMs'][sample_index] is None:

@@ -70,6 +70,7 @@ def flatten_hangs(build_date, thread_hang):
                     'stacks': [thread_hang['nativeStacks']['stacks'][x['nativeStack']]],
                 },
                 'histogram': x['histogram'],
+                'annotations': [],
             }
             for x in hangs
             if 'nativeStack' in x
@@ -185,6 +186,10 @@ def map_to_hang_data(hang, config):
     build_date = hang['build_date']
     memory_map = hang['hang']['nativeStack']['memoryMap']
     native_stack = hang['hang']['nativeStack']['stacks'][0]
+    user_interacting = False
+    annotations = hang['hang']['annotations']
+    if len(annotations) > 0 and any('UserInteracting' in a and a['UserInteracting'] == 'true' for a in annotations):
+        user_interacting = True
 
     key = (
         tuple((a,b) for a,b in native_stack),
@@ -192,7 +197,8 @@ def map_to_hang_data(hang, config):
         tuple(hang['hang']['stack']),
         hang['runnable_name'],
         hang['thread_name'],
-        build_date)
+        build_date,
+        user_interacting)
     return (key, (
         float(hang_sum),
         float(hang_count),
@@ -231,6 +237,7 @@ def process_hang_key(key, processed_modules):
         key[3],
         key[4],
         key[5],
+        key[6],
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
