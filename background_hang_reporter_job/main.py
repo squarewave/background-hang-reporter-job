@@ -11,6 +11,7 @@ import time
 import ujson as json
 import urllib
 import urllib2
+import uuid
 
 from bisect import bisect
 from boto3.s3.transfer import S3Transfer
@@ -461,23 +462,25 @@ def write_file(name, stuff, config):
 
     if not os.path.exists('./output'):
         os.makedirs('./output')
-    with open(filename, 'w') as f:
-        f.write(jsonblob)
     with gzip.open(gzfilename, 'w') as f:
         f.write(jsonblob)
 
     if config['use_s3']:
         bucket = "telemetry-public-analysis-2"
-        timestamped_s3_key = "bhr/data/hang_aggregates/" + name + ".json"
+        s3_key = "bhr/data/hang_aggregates/" + name + ".json"
+        s3_uuid_key = "bhr/data/hang_aggregates/" + name + "_" + config['uuid'] + ".json"
         client = boto3.client('s3', 'us-west-2')
         transfer = S3Transfer(client)
-        transfer.upload_file(filename,
-                             bucket,
-                             timestamped_s3_key,
-                             extra_args={'ContentType':'application/json'})
         transfer.upload_file(gzfilename,
                              bucket,
-                             timestamped_s3_key,
+                             s3_key,
+                             extra_args={
+                                'ContentType':'application/json',
+                                'ContentEncoding':'gzip'
+                            })
+        transfer.upload_file(gzfilename,
+                             bucket,
+                             s3_uuid_key,
                              extra_args={
                                 'ContentType':'application/json',
                                 'ContentEncoding':'gzip'
@@ -496,6 +499,7 @@ def etl_job(sc, sqlContext, config=None):
         'hang_lower_bound': 128,
         'hang_upper_bound': 16000,
         'stack_acceptance_threshold': 0.0001,
+        'uuid': uuid.uuid4().hex,
     }
 
     if config is not None:
