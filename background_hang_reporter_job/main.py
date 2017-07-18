@@ -158,25 +158,6 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
             symbolicated.append(format_frame(UNSYMBOLICATED, 'unknown'))
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
-def get_symbolicated_stack(hang, processed_modules, usage_hours_by_date):
-    build_date = hang['build_date']
-    usage_hours = usage_hours_by_date[build_date]
-
-    if usage_hours <= 0:
-        return None
-
-    memory_map = hang['hang']['nativeStack']['memoryMap']
-    native_stack = hang['hang']['nativeStack']['stacks'][0]
-    symbolicated, percent_symbolicated = symbolicate_stacks(memory_map, native_stack, processed_modules)
-
-    # We only want mostly-symbolicated stacks. Anything else is A) not useful
-    # information, and B) probably a local build, which could be hanging for
-    # much different reasons.
-    if percent_symbolicated < 0.8:
-        return None
-
-    return tuple(symbolicated)
-
 def get_pseudo_stack(hang, usage_hours_by_date):
     build_date = hang['build_date']
     usage_hours = usage_hours_by_date[build_date]
@@ -214,12 +195,6 @@ def map_to_hang_data(hang, config):
         float(hang_sum),
         float(hang_count),
     ))
-
-def get_all_symbolicated_stacks(hangs, processed_modules, usage_hours_by_date):
-    return (hangs.map(lambda hang: get_symbolicated_stack(hang, processed_modules, usage_hours_by_date))
-        .filter(lambda hang: hang is not None)
-        .distinct()
-        .collect())
 
 def get_all_pseudo_stacks(hangs, usage_hours_by_date):
     return (hangs.map(lambda hang: get_pseudo_stack(hang, usage_hours_by_date))
@@ -322,70 +297,32 @@ def get_file_URL(module, config):
         urllib.quote_plus(file_name)
     ])
 
-class ThreadFetchSymbolData(threading.Thread):
-    def __init__(self, queue, config, result_dict):
-        threading.Thread.__init__(self)
-        self.queue = queue
-        self.config = config
-        self.result_dict = result_dict
+def process_module(module, offsets, config):
+    result = []
+    file_URL = get_file_URL(module, self.config)
+    success, response = fetch_URL(file_URL)
+    module_name, breakpad_id = module
 
-    def run(self):
-        while True:
-            try:
-                module = self.queue.get(False)
-                file_URL = get_file_URL(module, self.config)
-                success, response = fetch_URL(file_URL)
-                self.result_dict[module] = (success, response)
-            except Queue.Empty:
-                return
-            except:
-                print("Unexpected error:", sys.exc_info()[0])
-            self.queue.task_done()
+    if success:
+        sorted_keys, sym_map = make_sym_map(response)
 
-def fetch_module_data(stacks_by_module, config):
-    symbol_data = {}
-    queue = Queue.Queue()
+        for offset in offsets:
+            i = bisect(sorted_keys, offset)
+            key = sorted_keys[i - 1] if i else None
 
-    for module, offsets in stacks_by_module.iteritems():
-        queue.put(module)
-
-    for i in xrange(0,32):
-        t = ThreadFetchSymbolData(queue, config, symbol_data)
-        t.start()
-
-    queue.join()
-    return symbol_data
-
-def process_fetched_module_data(stacks_by_module, symbol_data):
-    stack_dict = {}
-    for module, offsets in stacks_by_module.iteritems():
-        module_name, breakpad_id = module
-        success, response = symbol_data[module]
-
-        if success:
-            sorted_keys, sym_map = make_sym_map(response)
-
-            for offset in offsets:
-                i = bisect(sorted_keys, offset)
-                key = sorted_keys[i - 1] if i else None
-
-                symbol = sym_map.get(key)
-                if symbol is not None:
-                    stack_dict[breakpad_id, offset] = format_frame(symbol, module_name)
-                else:
-                    stack_dict[breakpad_id, offset] = format_frame(UNSYMBOLICATED, module_name)
-        else:
-            for offset in offsets:
-                stack_dict[breakpad_id, offset] = format_frame(UNSYMBOLICATED, module_name)
-
-    return stack_dict
+            symbol = sym_map.get(key)
+            if symbol is not None:
+                result.append((breakpad_id, offset), format_frame(symbol, module_name))
+            else:
+                result.append((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name))
+    else:
+        for offset in offsets:
+            result.append((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name))
+    return result
 
 def process_modules(stacks_by_module, config):
-    symbol_data = time_code("Fetching {} distinct module URLs".format(len(stacks_by_module.items())),
-        lambda: fetch_module_data(stacks_by_module, config))
-
-    return time_code("Processing fetched module data",
-        lambda: process_fetched_module_data(stacks_by_module, symbol_data))
+    data = sc.parallelize(stacks_by_module.iteritems())
+    return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
 
 def transform_pings(pings, config):
     windows_pings_only = time_code("Filtering to Windows pings",
@@ -397,7 +334,8 @@ def transform_pings(pings, config):
     stacks_by_module = time_code("Getting stacks by module",
         lambda: get_stacks_by_module(hangs))
 
-    processed_modules = process_modules(stacks_by_module, config)
+    processed_modules = time_code("Processing modules",
+        lambda: process_modules(stacks_by_module, config))
 
     usage_hours_by_date = time_code("Getting usage hours",
         lambda: get_usage_hours_by_date(windows_pings_only))
