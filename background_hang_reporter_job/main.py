@@ -4,27 +4,22 @@ import gc
 import gzip
 import os
 import pandas as pd
+import Queue
 import sys
+import threading
 import ujson as json
 import urllib
+import urllib2
 
 from bisect import bisect
 from boto3.s3.transfer import S3Transfer
 from datetime import datetime, timedelta
-from eventlet.green import urllib2
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 from sets import Set
 from StringIO import StringIO
 
 from profile import ProfileProcessor
-
-try:
-    import eventlet
-except ImportError:
-    # Assume that only the master, which should be able to import
-    # eventlet, will need to use it.
-    pass
 
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 512
@@ -309,19 +304,41 @@ def get_file_URL(module, config):
         urllib.quote_plus(file_name)
     ])
 
+class ThreadFetchSymbolData(threading.Thread):
+    def __init__(self, queue, config, result_dict):
+        threading.Thread.__init__(self)
+        self.queue = queue
+        self.config = config
+        self.result_dict = result_dict
+
+def run(self):
+    while True:
+        module = self.queue.get()
+        file_URL = get_file_URL(module, self.config)
+        success, response = fetch_URL(file_URL)
+        self.result_dict[module] = (success, response)
+
+        self.queue.task_done()
+
 def process_modules(stacks_by_module, config):
+    print "Fetching {} distinct module URLs...".format(len(stacks_by_module.items()))
+    symbol_data = {}
+    queue = Queue.Queue()
+    for i in xrange(0,32):
+        t = ThreadFetchSymbolData(queue, config, symbol_data)
+        t.start()
+
+    for module, offsets in stacks_by_module.iteritems():
+        queue.put(module)
+
+    queue.join()
+
     stack_dict = {}
 
-    file_URLs = [
-        get_file_URL(module, config)
-        for module, offsets in stacks_by_module.iteritems()
-    ]
-    pool = eventlet.GreenPool()
-
-    print "({} distinct module URLs)".format(len(file_URLs))
-
-    for (success, response), (module, offsets) in zip(pool.imap(fetch_URL, file_URLs), stacks_by_module.iteritems()):
+    print "Processing fetched module data..."
+    for module, offsets in stacks_by_module.iteritems():
         module_name, breakpad_id = module
+        success, response = symbol_data[module]
 
         if success:
             sorted_keys, sym_map = make_sym_map(response)
