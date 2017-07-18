@@ -311,20 +311,20 @@ class ThreadFetchSymbolData(threading.Thread):
         self.config = config
         self.result_dict = result_dict
 
-def run(self):
-    while True:
-        try:
-            module = self.queue.get(False)
-            file_URL = get_file_URL(module, self.config)
-            success, response = fetch_URL(file_URL)
-            print "Fetched!"
-            self.result_dict[module] = (success, response)
-        except Queue.Empty:
-            return
-        except:
-            print("Unexpected error:", sys.exc_info()[0])
-        finally:
-            self.queue.task_done()
+    def run(self):
+        while True:
+            try:
+                module = self.queue.get(False)
+                file_URL = get_file_URL(module, self.config)
+                success, response = fetch_URL(file_URL)
+                print "Fetched!"
+                self.result_dict[module] = (success, response)
+            except Queue.Empty:
+                return
+            except:
+                print("Unexpected error:", sys.exc_info()[0])
+            finally:
+                self.queue.task_done()
 
 def process_modules(stacks_by_module, config):
     print "Fetching {} distinct module URLs...".format(len(stacks_by_module.items()))
