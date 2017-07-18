@@ -163,7 +163,6 @@ def process_thread(thread):
         'stringArray': thread['stringArray'].get_items(),
     }
 
-
 class ProfileProcessor:
     def __init__(self, config):
         self.config = config
@@ -174,12 +173,14 @@ class ProfileProcessor:
             print str
 
     def ingest(self, data):
+        print "{} unfiltered samples in data".format(len(data))
         data = [
             x
             for x in data
             # x[5] should be hang_ms
             if x[5] > 0.0
         ]
+        print "{} filtered samples in data".format(len(data))
 
         prune_stack_cache = UniqueKeyedTable(lambda key: {
             'totalStackHangMs': 0.0
