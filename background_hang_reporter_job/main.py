@@ -515,7 +515,5 @@ def etl_job(sc, sqlContext, config=None):
         # allowing the JVM to clean them up on its end.
         gc.collect()
 
-        print sys.getsizeof(profile_processor)
-
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
