@@ -299,7 +299,7 @@ def get_file_URL(module, config):
 
 def process_module(module, offsets, config):
     result = []
-    file_URL = get_file_URL(module, self.config)
+    file_URL = get_file_URL(module, config)
     success, response = fetch_URL(file_URL)
     module_name, breakpad_id = module
 
@@ -312,19 +312,19 @@ def process_module(module, offsets, config):
 
             symbol = sym_map.get(key)
             if symbol is not None:
-                result.append((breakpad_id, offset), format_frame(symbol, module_name))
+                result.append(((breakpad_id, offset), format_frame(symbol, module_name)))
             else:
-                result.append((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name))
+                result.append(((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name)))
     else:
         for offset in offsets:
-            result.append((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name))
+            result.append(((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name)))
     return result
 
-def process_modules(stacks_by_module, config):
+def process_modules(sc, stacks_by_module, config):
     data = sc.parallelize(stacks_by_module.iteritems())
     return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
 
-def transform_pings(pings, config):
+def transform_pings(sc, pings, config):
     windows_pings_only = time_code("Filtering to Windows pings",
         lambda: pings.filter(windows_only).filter(ping_is_valid))
 
@@ -335,7 +335,7 @@ def transform_pings(pings, config):
         lambda: get_stacks_by_module(hangs))
 
     processed_modules = time_code("Processing modules",
-        lambda: process_modules(stacks_by_module, config))
+        lambda: process_modules(sc, stacks_by_module, config))
 
     usage_hours_by_date = time_code("Getting usage hours",
         lambda: get_usage_hours_by_date(windows_pings_only))
@@ -448,7 +448,7 @@ def etl_job(sc, sqlContext, config=None):
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(2, final_config['days_to_aggregate'] + 2):
         day_start = time.time()
-        transformed = transform_pings(get_data(sc, final_config, -x, -x), final_config)
+        transformed = transform_pings(sc, get_data(sc, final_config, -x, -x), final_config)
         time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.

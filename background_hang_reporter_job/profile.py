@@ -294,5 +294,5 @@ class ProfileProcessor:
         print "Processing into final format..."
         return {
             'threads': [process_thread(t) for t in self.thread_table.get_items()],
-            'uuid': config['uuid'],
+            'uuid': self.config['uuid'],
         }
