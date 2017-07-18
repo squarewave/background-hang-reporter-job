@@ -448,7 +448,9 @@ def etl_job(sc, sqlContext, config=None):
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(2, final_config['days_to_aggregate'] + 2):
         day_start = time.time()
-        transformed = transform_pings(sc, get_data(sc, final_config, -x, -x), final_config)
+        data = time_code("Getting data",
+            lambda: get_data(sc, final_config, -x, -x))
+        transformed = transform_pings(sc, data, final_config)
         time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
