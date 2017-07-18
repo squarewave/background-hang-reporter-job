@@ -322,8 +322,7 @@ class ThreadFetchSymbolData(threading.Thread):
                 return
             except:
                 print("Unexpected error:", sys.exc_info()[0])
-            finally:
-                self.queue.task_done()
+            self.queue.task_done()
 
 def process_modules(stacks_by_module, config):
     print "Fetching {} distinct module URLs...".format(len(stacks_by_module.items()))
