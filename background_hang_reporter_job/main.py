@@ -1,6 +1,5 @@
 import boto3
 import contextlib
-import eventlet
 import gc
 import gzip
 import os
@@ -19,6 +18,13 @@ from sets import Set
 from StringIO import StringIO
 
 from profile import ProfileProcessor
+
+try:
+    import eventlet
+except ImportError:
+    # Assume that only the master, which should be able to import
+    # eventlet, will need to use it.
+    pass
 
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 512
