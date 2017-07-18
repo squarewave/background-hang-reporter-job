@@ -174,6 +174,12 @@ class ProfileProcessor:
             print str
 
     def ingest(self, data):
+        data = [
+            x
+            for x in data
+            # x[5] should be hang_ms
+            if x[5] > 0.0
+        ]
 
         prune_stack_cache = UniqueKeyedTable(lambda key: {
             'totalStackHangMs': 0.0
