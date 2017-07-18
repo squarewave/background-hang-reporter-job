@@ -7,6 +7,7 @@ import pandas as pd
 import Queue
 import sys
 import threading
+import time
 import ujson as json
 import urllib
 import urllib2
@@ -23,6 +24,15 @@ from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 512
+
+def time_code(name, fn):
+    print "{}...".format(name)
+    start = time.time()
+    result = fn()
+    end = time.time()
+    delta = end - start
+    print "{} took {}ms to complete".format(name, int(round(delta * 1000)))
+    return result
 
 def get_data(sc, config, start_date_relative, end_date_relative):
     start_date = (datetime.today() + timedelta(days=start_date_relative))
@@ -331,8 +341,7 @@ class ThreadFetchSymbolData(threading.Thread):
                 print("Unexpected error:", sys.exc_info()[0])
             self.queue.task_done()
 
-def process_modules(stacks_by_module, config):
-    print "Fetching {} distinct module URLs...".format(len(stacks_by_module.items()))
+def fetch_module_data(stacks_by_module, config):
     symbol_data = {}
     queue = Queue.Queue()
 
@@ -344,10 +353,10 @@ def process_modules(stacks_by_module, config):
         t.start()
 
     queue.join()
+    return symbol_data
 
+def process_fetched_module_data(stacks_by_module, symbol_data)
     stack_dict = {}
-
-    print "Processing fetched module data..."
     for module, offsets in stacks_by_module.iteritems():
         module_name, breakpad_id = module
         success, response = symbol_data[module]
@@ -370,24 +379,30 @@ def process_modules(stacks_by_module, config):
 
     return stack_dict
 
+def process_modules(stacks_by_module, config):
+    symbol_data = time_code("Fetching {} distinct module URLs".format(len(stacks_by_module.items())),
+        lambda: fetch_module_data(stacks_by_module, config))
+
+    return time_code("Processing fetched module data",
+        lambda: process_fetched_module_data(stacks_by_module, symbol_data))
+
 def transform_pings(pings, config):
-    print "Filtering to Windows pings..."
-    windows_pings_only = pings.filter(windows_only).filter(ping_is_valid)
+    windows_pings_only = time_code("Filtering to Windows pings",
+        lambda: pings.filter(windows_only).filter(ping_is_valid))
 
-    print "Filtering to hangs with native stacks..."
-    hangs = filter_for_hangs_of_type(windows_pings_only)
+    hangs = time_code("Filtering to hangs with native stacks",
+        lambda: filter_for_hangs_of_type(windows_pings_only))
 
-    print "Getting stacks by module..."
-    stacks_by_module = get_stacks_by_module(hangs)
-    print "Processing modules..."
+    stacks_by_module = time_code("Getting stacks by module",
+        lambda: get_stacks_by_module(hangs))
+
     processed_modules = process_modules(stacks_by_module, config)
 
-    print "Getting usage hours..."
-    usage_hours_by_date = get_usage_hours_by_date(windows_pings_only)
+    usage_hours_by_date = time_code("Getting usage hours",
+        lambda: get_usage_hours_by_date(windows_pings_only))
 
-    print "Grouping stacks..."
-    result = get_grouped_sums_and_counts(hangs,
-        processed_modules, usage_hours_by_date, config)
+    result = time_code("Grouping stacks",
+        lambda: get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config))
     return result
 
 def fetch_URL(url):
@@ -491,8 +506,7 @@ def etl_job(sc, sqlContext, config=None):
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(2, final_config['days_to_aggregate'] + 2):
         transformed = transform_pings(get_data(sc, final_config, -x, -x), final_config)
-        print "Passing stacks to processor..."
-        profile_processor.ingest(transformed)
+        time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
