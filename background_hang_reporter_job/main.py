@@ -81,7 +81,7 @@ def flatten_hangs(build_date, thread_hang):
                     'stacks': [thread_hang['nativeStacks']['stacks'][x['nativeStack']]],
                 },
                 'histogram': x['histogram'],
-                'annotations': [],
+                'annotations': x['annotations'] if 'annotations' in x else [],
             }
             for x in hangs
             if 'nativeStack' in x
