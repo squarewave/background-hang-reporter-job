@@ -424,25 +424,29 @@ def write_file(name, stuff, config):
                                 'ContentEncoding':'gzip'
                             })
 
+def process_profile(profile_processor, transformed_pings):
+    profile_processor.ingest(transformed_pings)
+
 def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {
         'days_to_aggregate': 21,
         'use_s3': True,
-        'sample_size': 0.02,
+        'sample_size': 0.1,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
         'hang_profile_filename': 'hang_profile_128_16000',
         'print_debug_info': False,
         'hang_lower_bound': 128,
         'hang_upper_bound': 16000,
-        'stack_acceptance_threshold': 0.0001,
+        'stack_acceptance_threshold': 0.001,
         'uuid': uuid.uuid4().hex,
     }
 
     if config is not None:
         final_config.update(config)
 
+    processor_thread = None
     profile_processor = ProfileProcessor(final_config)
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
@@ -451,13 +455,19 @@ def etl_job(sc, sqlContext, config=None):
         data = time_code("Getting data",
             lambda: get_data(sc, final_config, -x, -x))
         transformed = transform_pings(sc, data, final_config)
-        time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
+        if processor_thread:
+            time_code("Joining processor thread", lambda: processor_thread.join())
+        processor_thread = threading.Thread(target= profile_processor.ingest, args=[transformed])
+        processor_thread.start()
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
         day_end = time.time()
         day_delta = day_end - day_start
         print "Finished date - took {}s".format(int(round(day_delta)))
+
+    if processor_thread:
+        time_code("Joining final processor thread", lambda: processor_thread.join())
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
