@@ -429,6 +429,7 @@ def etl_job(sc, sqlContext, config=None):
 
     final_config = {
         'days_to_aggregate': 21,
+        'date_clumping': 3,
         'use_s3': True,
         'sample_size': 0.02,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
@@ -443,13 +444,20 @@ def etl_job(sc, sqlContext, config=None):
     if config is not None:
         final_config.update(config)
 
+    iterations = (final_config['days_to_aggregate'] + final_config['date_clumping'] - 1) / final_config['date_clumping']
     profile_processor = ProfileProcessor(final_config)
+
+    job_start = time.time()
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
-    for x in xrange(2, final_config['days_to_aggregate'] + 2):
+    for x in xrange(0, iterations):
         day_start = time.time()
+        rel_end = x * final_config['date_clumping']
+        rel_end = -rel_end - 2 ## offset by 2 because the last two build dates aren't stable
+        rel_start = min((x + 1) * final_config['date_clumping'] - 1, final_config['days_to_aggregate'])
+        rel_start = -rel_start - 2 ## offset by 2 because the last two build dates aren't stable
         data = time_code("Getting data",
-            lambda: get_data(sc, final_config, -x, -x))
+            lambda: get_data(sc, final_config, rel_start, rel_end))
         transformed = transform_pings(sc, data, final_config)
         time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
@@ -457,7 +465,12 @@ def etl_job(sc, sqlContext, config=None):
         gc.collect()
         day_end = time.time()
         day_delta = day_end - day_start
-        print "Finished date - took {}s".format(int(round(day_delta)))
+        print "Iteration took {}s".format(int(round(day_delta)))
+        job_elapsed = time.time() - job_start
+        percent_done = float(x + 1) / float(iterations)
+        projected = job_elapsed / percent_done
+        remaining = projected - job_elapsed
+        print "Job should finish in {}".format(timedelta(seconds=remaining))
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
