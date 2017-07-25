@@ -429,15 +429,15 @@ def etl_job(sc, sqlContext, config=None):
 
     final_config = {
         'days_to_aggregate': 21,
-        'date_clumping': 3,
+        'date_clumping': 2,
         'use_s3': True,
-        'sample_size': 0.1,
+        'sample_size': 0.05,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
         'hang_profile_filename': 'hang_profile_128_16000',
         'print_debug_info': False,
         'hang_lower_bound': 128,
         'hang_upper_bound': 16000,
-        'stack_acceptance_threshold': 0.0001,
+        'stack_acceptance_threshold': 0.001,
         'uuid': uuid.uuid4().hex,
     }
 
