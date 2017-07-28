@@ -175,6 +175,9 @@ def map_to_hang_data(hang, config):
     hang_sum = minned_sum[minned_sum.index < config['hang_upper_bound']].sum()
     minned = hist[hist.index >= config['hang_lower_bound']]
     hang_count = minned[minned.index < config['hang_upper_bound']].sum()
+    if hang_count > config['hang_outlier_threshold']:
+        return None
+
     build_date = hang['build_date']
     memory_map = hang['hang']['nativeStack']['memoryMap']
     native_stack = hang['hang']['nativeStack']['stacks'][0]
@@ -438,6 +441,7 @@ def etl_job(sc, sqlContext, config=None):
         'hang_lower_bound': 128,
         'hang_upper_bound': 16000,
         'stack_acceptance_threshold': 0.001,
+        'hang_outlier_threshold': 512,
         'uuid': uuid.uuid4().hex,
     }
 
