@@ -432,7 +432,7 @@ def etl_job(sc, sqlContext, config=None):
 
     final_config = {
         'days_to_aggregate': 21,
-        'date_clumping': 2,
+        'date_clumping': 1,
         'use_s3': True,
         'sample_size': 0.08,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
