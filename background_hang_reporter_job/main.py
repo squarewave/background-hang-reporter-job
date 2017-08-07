@@ -182,9 +182,10 @@ def map_to_hang_data(hang, config):
     memory_map = hang['hang']['nativeStack']['memoryMap']
     native_stack = hang['hang']['nativeStack']['stacks'][0]
     user_interacting = False
-    annotations = hang['hang']['annotations']
-    if len(annotations) > 0 and any('UserInteracting' in a and a['UserInteracting'] == 'true' for a in annotations):
-        user_interacting = True
+    if 'annotations' in hang['hang']:
+        annotations = hang['hang']['annotations']
+        if any('UserInteracting' in a and a['UserInteracting'] == 'true' for a in annotations):
+            user_interacting = True
 
     key = (
         tuple((a,b) for a,b in native_stack),
