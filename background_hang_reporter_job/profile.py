@@ -14,19 +14,19 @@ def to_struct_of_arrays(a):
     return result
 
 class UniqueKeyedTable:
-    def __init__(self, get_default_from_key):
+    def __init__(self, get_default_from_key, key_names = ()):
         self.get_default_from_key = get_default_from_key
         self.key_to_index_map = {}
+        self.key_names = key_names
         self.items = []
 
     def key_to_index(self, key):
-        string_key = self.get_dict_key(key)
-        if string_key in self.key_to_index_map:
-            return self.key_to_index_map[string_key]
+        if key in self.key_to_index_map:
+            return self.key_to_index_map[key]
 
         index = len(self.items)
         self.items.append(self.get_default_from_key(key))
-        self.key_to_index_map[string_key] = index
+        self.key_to_index_map[key] = index
         return index
 
     def key_to_item(self, key):
@@ -39,16 +39,19 @@ class UniqueKeyedTable:
         return self.items
 
     def struct_of_arrays(self):
-        return to_struct_of_arrays(self.items)
+        if len(self.items) == 0:
+            raise Exception('Need at least one item in array for this to work.')
+
+        result = {}
+        num_keys = len(self.key_names)
+        for i in xrange(0, num_keys):
+            result[self.key_names[i]] = [x[i] for x in self.items]
+
+        result['length'] = len(a)
+        return result
 
     def sorted_struct_of_arrays(self, key):
         return to_struct_of_arrays(sorted(self.items, key=key))
-
-    def get_dict_key(self, key):
-        # Only supports one level of nesting
-        if type(key) is dict:
-            return tuple(key[k] for k in sorted(key.keys()))
-        return key
 
 class GrowToFitList(list):
     def __setitem__(self, index, value):
@@ -95,32 +98,32 @@ def get_default_lib(name):
 def get_default_thread(name):
     strings_table = UniqueKeyedTable(lambda str: str)
     libs = UniqueKeyedTable(get_default_lib)
-    func_table = UniqueKeyedTable(lambda key: ({
-        'name': strings_table.key_to_index(key['name']),
-        'lib': None if key['lib'] is None else libs.key_to_index(key['lib']),
-    }))
-    stack_table = UniqueKeyedTable(lambda key: ({
-        'prefix': key['prefix'],
-        'func': func_table.key_to_index({'name': key['name'], 'lib': key['lib']}),
-    }))
+    func_table = UniqueKeyedTable(lambda key: (
+        strings_table.key_to_index(key[0]),
+        None if key[1] is None else libs.key_to_index(key[1])
+    ), ('name', 'lib'))
+    stack_table = UniqueKeyedTable(lambda key: (
+        key[2],
+        func_table.key_to_index((key[0], key[1]))
+    ), ('prefix', 'func'))
     sample_table = UniqueKeyedTable(lambda key: ({
-        'stack': key['stack'],
-        'runnable': strings_table.key_to_index(key['runnable']),
-        'userInteracting': key['userInteracting'],
-    }))
-    pseudo_stack_table = UniqueKeyedTable(lambda key: ({
-        'prefix': key['prefix'],
-        'func': func_table.key_to_index({'name': key['name'], 'lib': None}),
-    }))
-    stack_to_pseudo_stacks_table = UniqueKeyedTable(lambda key: ({
-        'stack': key['stack'],
-        'pseudo_stack': key['pseudo_stack'],
-        'stackHangMs': 0.0,
-        'stackHangCount': 0.0,
-    }))
+        key[0],
+        strings_table.key_to_index(key[1]),
+        key[2]
+    }), ('stack', 'runnable', 'userInteracting'))
+    pseudo_stack_table = UniqueKeyedTable(lambda key: (
+        key[1],
+        func_table.key_to_index((key[0], None))
+    ), ('prefix', 'func'))
+    stack_to_pseudo_stacks_table = UniqueKeyedTable(lambda key: [
+        key[0],
+        key[1],
+        0.0,
+        0.0
+    ], ('stack', 'pseudoStack', 'stackHangMs', 'stackHangCount'))
 
-    stack_table.key_to_index({'name': '(root)', 'lib': None, 'prefix': None})
-    pseudo_stack_table.key_to_index({'name': '(root)', 'prefix': None})
+    stack_table.key_to_index(('(root)', None, None))
+    pseudo_stack_table.key_to_index(('(root)', None))
 
     global tid
     global pid
@@ -182,30 +185,20 @@ class ProfileProcessor:
         ]
         print "{} filtered samples in data".format(len(data))
 
-        prune_stack_cache = UniqueKeyedTable(lambda key: {
-            'totalStackHangMs': 0.0
-        })
-        root_stack = prune_stack_cache.key_to_item({'name': '(root)', 'lib': None, 'prefix': None})
+        prune_stack_cache = UniqueKeyedTable(lambda key: [0.0])
+        root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
             stack, pseudo, runnable_name, thread_name, build_date, user_interacting, hang_ms, hang_count = row
 
-            root_stack['totalStackHangMs'] += hang_ms
+            root_stack[0] += hang_ms
 
             last_stack = 0
             for (func_name, lib_name) in stack:
-                cache_item = prune_stack_cache.key_to_item({
-                    'name': func_name,
-                    'lib': lib_name,
-                    'prefix': last_stack
-                })
-                last_stack = prune_stack_cache.key_to_index({
-                    'name': func_name,
-                    'lib': lib_name,
-                    'prefix': last_stack
-                })
-                cache_item['totalStackHangMs'] += hang_ms
+                cache_item = prune_stack_cache.key_to_item((func_name, lib_name, last_stack))
+                last_stack = prune_stack_cache.key_to_index((func_name, lib_name, last_stack))
+                cache_item[0] += hang_ms
 
         print "Processing stacks..."
         for row in data:
@@ -222,29 +215,18 @@ class ProfileProcessor:
             last_cache_item_index = 0
             last_lib_name = None
             for (func_name, lib_name) in stack:
-                cache_item_index = prune_stack_cache.key_to_index({
-                    'name': func_name,
-                    'lib': lib_name,
-                    'prefix': last_cache_item_index})
+                cache_item_index = prune_stack_cache.key_to_index((func_name, lib_name, last_cache_item_index))
                 cache_item = prune_stack_cache.index_to_item(cache_item_index)
-                if cache_item['totalStackHangMs'] / root_stack['totalStackHangMs'] > self.config['stack_acceptance_threshold']:
+                if cache_item[0] / root_stack[0] > self.config['stack_acceptance_threshold']:
                     last_lib_name = lib_name
-                    last_stack = stack_table.key_to_index({
-                        'name': func_name,
-                        'lib': lib_name,
-                        'prefix': last_stack
-                    })
+                    last_stack = stack_table.key_to_index((func_name, lib_name, last_stack))
                     last_cache_item_index = cache_item_index
                 else:
                     self.debugDump("Stripping stack {} - {} / {}".format(func_name,
-                        cache_item['totalStackHangMs'], root_stack['totalStackHangMs']))
+                        cache_item[0], root_stack[0]))
                     break
 
-            sample_index = sample_table.key_to_index({
-                'stack': last_stack,
-                'runnable': runnable_name,
-                'userInteracting': user_interacting
-            })
+            sample_index = sample_table.key_to_index((last_stack, runnable_name, user_interacting))
 
             date = dates.key_to_item(build_date)
             if date['sampleHangMs'][sample_index] is None:
@@ -256,15 +238,12 @@ class ProfileProcessor:
 
             last_pseudo = 0
             for frame in pseudo:
-                last_pseudo = pseudo_stack_table.key_to_index({'name': frame, 'prefix': last_pseudo})
+                last_pseudo = pseudo_stack_table.key_to_index((frame, last_pseudo))
 
-            stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item({
-                'stack': last_stack,
-                'pseudo_stack': last_pseudo
-            })
+            stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item((last_stack, last_pseudo))
 
-            stack_to_pseudo_stack['stackHangMs'] += hang_ms
-            stack_to_pseudo_stack['stackHangCount'] += hang_count
+            stack_to_pseudo_stack[2] += hang_ms
+            stack_to_pseudo_stack[3] += hang_count
 
     def process_into_profile(self):
         print "Processing into final format..."
