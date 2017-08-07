@@ -190,7 +190,7 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, user_interacting, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
 
             root_stack[0] += hang_ms
 
@@ -202,7 +202,7 @@ class ProfileProcessor:
 
         print "Processing stacks..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, build_date, user_interacting, hang_ms, hang_count = row
+            stack, pseudo, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
@@ -228,7 +228,7 @@ class ProfileProcessor:
 
             sample_index = sample_table.key_to_index((last_stack, runnable_name, user_interacting))
 
-            date = dates.key_to_item(build_date)
+            date = dates.key_to_item(submission_date)
             if date['sampleHangMs'][sample_index] is None:
                 date['sampleHangMs'][sample_index] = 0.0
                 date['sampleHangCount'][sample_index] = 0

@@ -43,13 +43,13 @@ def get_data(sc, config, start_date_relative, end_date_relative):
 
     pings = (Dataset.from_source("telemetry")
         .where(docType='main')
-        .where(appBuildId=lambda b: (b.startswith(start_date_str) or b > start_date_str)
-                                     and (b.startswith(end_date_str) or b < end_date_str))
+        .where(submissionDate=lambda b: (b.startswith(start_date_str) or b > start_date_str)
+                                         and (b.startswith(end_date_str) or b < end_date_str))
         .where(appUpdateChannel="nightly")
         .records(sc, sample=config['sample_size']))
 
     properties = ["environment/system/os/name",
-                  "application/buildId",
+                  "meta/submissionDate",
                   "payload/info/subsessionLength",
                   "payload/childPayloads",
                   "payload/threadHangStats"]
@@ -60,14 +60,14 @@ def windows_only(p):
     return p["environment/system/os/name"] == "Windows_NT"
 
 def ping_is_valid(ping):
-    if not isinstance(ping["application/buildId"], basestring):
+    if not isinstance(ping["meta/submissionDate"], basestring):
         return False
     if type(ping["payload/info/subsessionLength"]) != int:
         return False
 
     return True
 
-def flatten_hangs(build_date, thread_hang):
+def flatten_hangs(submission_date, thread_hang):
     if 'name' not in thread_hang:
         return []
 
@@ -89,7 +89,7 @@ def flatten_hangs(build_date, thread_hang):
 
     return [
         {
-            'build_date': build_date,
+            'submission_date': submission_date,
             'thread_name': thread_hang['name'],
             'runnable_name': thread_hang['runnableName'] if 'runnableName' in thread_hang else '---',
             'hang': x
@@ -104,7 +104,7 @@ def flatten_hangs(build_date, thread_hang):
 def only_hangs_of_type(ping):
     result = []
 
-    build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
+    submission_date = ping["meta/submissionDate"][:8] # "YYYYMMDD" : 8 characters
     usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
     if usage_hours == 0:
@@ -116,11 +116,11 @@ def only_hangs_of_type(ping):
                 continue
 
             for thread_hang in payload['threadHangStats']:
-                result = result + flatten_hangs(build_date, thread_hang)
+                result = result + flatten_hangs(submission_date, thread_hang)
 
     if ping['payload/threadHangStats'] is not None:
         for thread_hang in ping['payload/threadHangStats']:
-            result = result + flatten_hangs(build_date, thread_hang)
+            result = result + flatten_hangs(submission_date, thread_hang)
 
     return result
 
@@ -159,8 +159,8 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
 def get_pseudo_stack(hang, usage_hours_by_date):
-    build_date = hang['build_date']
-    usage_hours = usage_hours_by_date[build_date]
+    submission_date = hang['submission_date']
+    usage_hours = usage_hours_by_date[submission_date]
 
     if usage_hours <= 0:
         return None
@@ -178,7 +178,7 @@ def map_to_hang_data(hang, config):
     if hang_count > config['hang_outlier_threshold']:
         return None
 
-    build_date = hang['build_date']
+    submission_date = hang['submission_date']
     memory_map = hang['hang']['nativeStack']['memoryMap']
     native_stack = hang['hang']['nativeStack']['stacks'][0]
     user_interacting = False
@@ -192,7 +192,7 @@ def map_to_hang_data(hang, config):
         tuple(hang['hang']['stack']),
         hang['runnable_name'],
         hang['thread_name'],
-        build_date,
+        submission_date,
         user_interacting)
     return (key, (
         float(hang_sum),
@@ -248,9 +248,9 @@ def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, c
     ]
 
 def get_usage_hours(ping):
-    build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
+    submission_date = ping["meta/submissionDate"]
     usage_hours = float(ping['payload/info/subsessionLength']) / 60.0 / 60.0
-    return (build_date, usage_hours)
+    return (submission_date, usage_hours)
 
 def merge_usage_hours(a, b):
     return a + b
