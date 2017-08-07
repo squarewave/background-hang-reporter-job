@@ -153,9 +153,9 @@ def symbolicate_stacks(memory_map, stack, processed_modules):
                 symbolicated.append(processed)
                 num_symbolicated += 1
             else:
-                symbolicated.append(format_frame(UNSYMBOLICATED, debug_name))
+                symbolicated.append((UNSYMBOLICATED, debug_name))
         else:
-            symbolicated.append(format_frame(UNSYMBOLICATED, 'unknown'))
+            symbolicated.append((UNSYMBOLICATED, 'unknown'))
     return symbolicated, float(num_symbolicated) / float(len(symbolicated))
 
 def get_pseudo_stack(hang, usage_hours_by_date):
@@ -315,12 +315,12 @@ def process_module(module, offsets, config):
 
             symbol = sym_map.get(key)
             if symbol is not None:
-                result.append(((breakpad_id, offset), format_frame(symbol, module_name)))
+                result.append(((breakpad_id, offset), (symbol, module_name)))
             else:
-                result.append(((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name)))
+                result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
     else:
         for offset in offsets:
-            result.append(((breakpad_id, offset), format_frame(UNSYMBOLICATED, module_name)))
+            result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
     return result
 
 def process_modules(sc, stacks_by_module, config):
@@ -386,9 +386,6 @@ def decode_response(response):
                 data_stream.seek(0)
                 return data_stream.read().decode('zlib')
     return response.read()
-
-def format_frame(symbol, module_name):
-    return "{} (in {})".format(symbol, module_name)
 
 def smart_hex(offset):
     return hex(int(offset))

@@ -194,19 +194,7 @@ class ProfileProcessor:
             root_stack['totalStackHangMs'] += hang_ms
 
             last_stack = 0
-            for frame in stack:
-                cpp_match = (
-                    re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
-                    re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
-                    re.search(r'^(.*) \(in ([^)]*)\)$', frame)
-                )
-                if cpp_match:
-                    func_name = cpp_match.group(1);
-                    lib_name = cpp_match.group(2);
-                else:
-                    func_name = frame;
-                    lib_name = 'unknown';
-
+            for (func_name, lib_name) in stack:
                 cache_item = prune_stack_cache.key_to_item({
                     'name': func_name,
                     'lib': lib_name,
@@ -233,19 +221,7 @@ class ProfileProcessor:
             last_stack = 0
             last_cache_item_index = 0
             last_lib_name = None
-            for frame in stack:
-                cpp_match = (
-                    re.search(r'^(.*) \(in ([^)]*)\) (\+ [0-9]+)$', frame) or
-                    re.search(r'^(.*) \(in ([^)]*)\) (\(.*:.*\))$', frame) or
-                    re.search(r'^(.*) \(in ([^)]*)\)$', frame)
-                )
-                if cpp_match:
-                    func_name = cpp_match.group(1);
-                    lib_name = cpp_match.group(2);
-                else:
-                    func_name = frame;
-                    lib_name = 'unknown';
-
+            for (func_name, lib_name) in stack:
                 cache_item_index = prune_stack_cache.key_to_index({
                     'name': func_name,
                     'lib': lib_name,
