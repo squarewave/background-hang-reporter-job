@@ -47,7 +47,7 @@ class UniqueKeyedTable:
         for i in xrange(0, num_keys):
             result[self.key_names[i]] = [x[i] for x in self.items]
 
-        result['length'] = len(a)
+        result['length'] = len(self.items)
         return result
 
     def sorted_struct_of_arrays(self, key):
