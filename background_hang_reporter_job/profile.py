@@ -106,11 +106,11 @@ def get_default_thread(name):
         key[2],
         func_table.key_to_index((key[0], key[1]))
     ), ('prefix', 'func'))
-    sample_table = UniqueKeyedTable(lambda key: ({
+    sample_table = UniqueKeyedTable(lambda key: (
         key[0],
         strings_table.key_to_index(key[1]),
         key[2]
-    }), ('stack', 'runnable', 'userInteracting'))
+    ), ('stack', 'runnable', 'userInteracting'))
     pseudo_stack_table = UniqueKeyedTable(lambda key: (
         key[1],
         func_table.key_to_index((key[0], None))
