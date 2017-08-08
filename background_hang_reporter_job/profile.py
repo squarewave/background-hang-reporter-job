@@ -38,20 +38,23 @@ class UniqueKeyedTable:
     def get_items(self):
         return self.items
 
-    def struct_of_arrays(self):
-        if len(self.items) == 0:
+    def inner_struct_of_arrays(self, items):
+        if len(items) == 0:
             raise Exception('Need at least one item in array for this to work.')
 
         result = {}
         num_keys = len(self.key_names)
         for i in xrange(0, num_keys):
-            result[self.key_names[i]] = [x[i] for x in self.items]
+            result[self.key_names[i]] = [x[i] for x in items]
 
-        result['length'] = len(self.items)
+        result['length'] = len(items)
         return result
 
+    def struct_of_arrays(self):
+        return self.inner_struct_of_arrays(self.items)
+
     def sorted_struct_of_arrays(self, key):
-        return to_struct_of_arrays(sorted(self.items, key=key))
+        return self.inner_struct_of_arrays(sorted(self.items, key=key))
 
 class GrowToFitList(list):
     def __setitem__(self, index, value):
@@ -161,7 +164,7 @@ def process_thread(thread):
         'stackTable': thread['stackTable'].struct_of_arrays(),
         'sampleTable': thread['sampleTable'].struct_of_arrays(),
         'pseudoStackTable': thread['pseudoStackTable'].struct_of_arrays(),
-        'stackToPseudoStacksTable': thread['stackToPseudoStacksTable'].sorted_struct_of_arrays(lambda r: r['stack']),
+        'stackToPseudoStacksTable': thread['stackToPseudoStacksTable'].sorted_struct_of_arrays(lambda r: r[0]),
         'dates': thread['dates'].get_items(),
         'stringArray': thread['stringArray'].get_items(),
     }
