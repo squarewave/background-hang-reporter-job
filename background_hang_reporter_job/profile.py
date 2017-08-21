@@ -114,19 +114,8 @@ def get_default_thread(name):
         strings_table.key_to_index(key[1]),
         key[2]
     ), ('stack', 'runnable', 'userInteracting'))
-    pseudo_stack_table = UniqueKeyedTable(lambda key: (
-        key[1],
-        func_table.key_to_index((key[0], None))
-    ), ('prefix', 'func'))
-    stack_to_pseudo_stacks_table = UniqueKeyedTable(lambda key: [
-        key[0],
-        key[1],
-        0.0,
-        0.0
-    ], ('stack', 'pseudoStack', 'stackHangMs', 'stackHangCount'))
 
     stack_table.key_to_index(('(root)', None, None))
-    pseudo_stack_table.key_to_index(('(root)', None))
 
     global tid
     global pid
@@ -139,8 +128,6 @@ def get_default_thread(name):
         'funcTable': func_table,
         'stackTable': stack_table,
         'sampleTable': sample_table,
-        'pseudoStackTable': pseudo_stack_table,
-        'stackToPseudoStacksTable': stack_to_pseudo_stacks_table,
         'stringArray': strings_table,
         'processType': 'tab' if name == 'Gecko_Child' or name == 'Gecko_Child_ForcePaint' else 'default',
         'tid': tid,
@@ -163,8 +150,6 @@ def process_thread(thread):
         'funcTable': thread['funcTable'].struct_of_arrays(),
         'stackTable': thread['stackTable'].struct_of_arrays(),
         'sampleTable': thread['sampleTable'].struct_of_arrays(),
-        'pseudoStackTable': thread['pseudoStackTable'].struct_of_arrays(),
-        'stackToPseudoStacksTable': thread['stackToPseudoStacksTable'].sorted_struct_of_arrays(lambda r: r[0]),
         'dates': thread['dates'].get_items(),
         'stringArray': thread['stringArray'].get_items(),
     }
@@ -193,7 +178,7 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
+            stack, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
 
             root_stack[0] += hang_ms
 
@@ -205,13 +190,11 @@ class ProfileProcessor:
 
         print "Processing stacks..."
         for row in data:
-            stack, pseudo, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
+            stack, runnable_name, thread_name, submission_date, user_interacting, hang_ms, hang_count = row
 
             thread = self.thread_table.key_to_item(thread_name)
             stack_table = thread['stackTable']
             sample_table = thread['sampleTable']
-            pseudo_stack_table = thread['pseudoStackTable']
-            stack_to_pseudo_stacks_table = thread['stackToPseudoStacksTable']
             dates = thread['dates']
 
             last_stack = 0
@@ -238,15 +221,6 @@ class ProfileProcessor:
 
             date['sampleHangMs'][sample_index] += hang_ms
             date['sampleHangCount'][sample_index] += hang_count
-
-            last_pseudo = 0
-            for frame in pseudo:
-                last_pseudo = pseudo_stack_table.key_to_index((frame, last_pseudo))
-
-            stack_to_pseudo_stack = stack_to_pseudo_stacks_table.key_to_item((last_stack, last_pseudo))
-
-            stack_to_pseudo_stack[2] += hang_ms
-            stack_to_pseudo_stack[3] += hang_count
 
     def process_into_profile(self):
         print "Processing into final format..."

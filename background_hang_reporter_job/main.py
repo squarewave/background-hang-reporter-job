@@ -42,19 +42,23 @@ def get_data(sc, config, start_date_relative, end_date_relative):
     end_date_str = end_date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
-        .where(docType='main')
+        .where(docType='OTHER')
         .where(submissionDate=lambda b: (b.startswith(start_date_str) or b > start_date_str)
                                          and (b.startswith(end_date_str) or b < end_date_str))
         .where(appUpdateChannel="nightly")
         .records(sc, sample=config['sample_size']))
 
+    pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
+
     properties = ["environment/system/os/name",
                   "meta/submissionDate",
-                  "payload/info/subsessionLength",
-                  "payload/childPayloads",
-                  "payload/threadHangStats"]
+                  "payload/modules",
+                  "payload/hangs"]
 
-    return get_pings_properties(pings, properties, with_processes=True)
+    try:
+        return get_pings_properties(pings, properties, with_processes=True)
+    except ValueError:
+        return None
 
 def windows_only(p):
     return p["environment/system/os/name"] == "Windows_NT"
@@ -62,70 +66,42 @@ def windows_only(p):
 def ping_is_valid(ping):
     if not isinstance(ping["meta/submissionDate"], basestring):
         return False
-    if type(ping["payload/info/subsessionLength"]) != int:
-        return False
+    # if type(ping["payload/info/subsessionLength"]) != int:
+    #     return False
 
     return True
 
-def flatten_hangs(submission_date, thread_hang):
-    if 'name' not in thread_hang:
-        return []
+def process_stack(stack, modules):
+    if isinstance(stack, list):
+        if stack[0] == -1 or stack[0] is None:
+            return (None, stack[1])
+        return ((modules[stack[0]][0], modules[stack[0]][1]), stack[1])
+    else:
+        return (('pseudo', None), stack)
 
-    hangs = thread_hang['hangs']
-    if 'nativeStacks' in thread_hang:
-        hangs = [
-            {
-                'stack': x['stack'],
-                'nativeStack': {
-                    'memoryMap': thread_hang['nativeStacks']['memoryMap'],
-                    'stacks': [thread_hang['nativeStacks']['stacks'][x['nativeStack']]],
-                },
-                'histogram': x['histogram'],
-                'annotations': x['annotations'] if 'annotations' in x else [],
-            }
-            for x in hangs
-            if 'nativeStack' in x
-        ]
-
-    return [
-        {
-            'submission_date': submission_date,
-            'thread_name': thread_hang['name'],
-            'runnable_name': thread_hang['runnableName'] if 'runnableName' in thread_hang else '---',
-            'hang': x
-        }
-        for x in hangs
-        if 'nativeStack' in x
-        and type(x['nativeStack']) is dict
-        and len(x['nativeStack']['stacks']) > 0
-        and len(x['nativeStack']['stacks'][0]) > 0
-    ]
-
-def only_hangs_of_type(ping):
+def process_hangs(ping):
     result = []
 
     submission_date = ping["meta/submissionDate"][:8] # "YYYYMMDD" : 8 characters
-    usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
+    # usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
-    if usage_hours == 0:
-        return result
+    # if usage_hours == 0:
+    #     return result
+    modules = ping['payload/modules']
+    hangs = ping['payload/hangs']
 
-    if ping['payload/childPayloads'] is not None:
-        for payload in ping['payload/childPayloads']:
-            if 'threadHangStats' not in payload:
-                continue
+    return [(
+        [process_stack(s, modules) for s in h['stack']],
+        h['duration'],
+        h['thread'],
+        h['runnableName'],
+        h['process'],
+        h['annotations'],
+        submission_date,
+    ) for h in hangs]
 
-            for thread_hang in payload['threadHangStats']:
-                result = result + flatten_hangs(submission_date, thread_hang)
-
-    if ping['payload/threadHangStats'] is not None:
-        for thread_hang in ping['payload/threadHangStats']:
-            result = result + flatten_hangs(submission_date, thread_hang)
-
-    return result
-
-def filter_for_hangs_of_type(pings):
-    return pings.flatMap(lambda p: only_hangs_of_type(p))
+def get_all_hangs(pings):
+    return pings.flatMap(lambda p: process_hangs(p))
 
 def map_to_frame_info(hang):
     memory_map = hang['hang']['nativeStack']['memoryMap']
@@ -135,76 +111,49 @@ def map_to_frame_info(hang):
         for module_index, offset in stack
     ]
 
-def get_stacks_by_module(hangs):
-    return (hangs.flatMap(map_to_frame_info)
+def get_frames_by_module(hangs):
+    return (hangs.flatMap(lambda hang: hang[0])
         .filter(lambda hang_tuple: hang_tuple[0] is not None)
+        .map(lambda hang_tuple: (hang_tuple[0], (hang_tuple[1],)))
         .distinct()
         .reduceByKey(lambda a,b: a + b, REDUCE_BY_KEY_PARALLELISM)
         .collectAsMap())
 
-def symbolicate_stacks(memory_map, stack, processed_modules):
+def symbolicate_stacks(stack, processed_modules):
     symbolicated = []
-    num_symbolicated = 0
-    for module_index, offset in stack:
-        if module_index != -1:
-            debug_name, breakpad_id = memory_map[module_index]
+    for module, offset in stack:
+        if module is not None:
+            debug_name, breakpad_id = module
             processed = processed_modules[breakpad_id, offset]
             if processed is not None:
                 symbolicated.append(processed)
-                num_symbolicated += 1
             else:
                 symbolicated.append((UNSYMBOLICATED, debug_name))
         else:
             symbolicated.append((UNSYMBOLICATED, 'unknown'))
-    return symbolicated, float(num_symbolicated) / float(len(symbolicated))
-
-def get_pseudo_stack(hang, usage_hours_by_date):
-    submission_date = hang['submission_date']
-    usage_hours = usage_hours_by_date[submission_date]
-
-    if usage_hours <= 0:
-        return None
-    return tuple(hang['hang']['stack'])
+    return symbolicated
 
 def map_to_hang_data(hang, config):
-    hist_data = hang['hang']['histogram']['values']
-    key_ints = map(int, hist_data.keys())
-    hist = pd.Series(hist_data.values(), index=key_ints)
-    weights = pd.Series(key_ints, index=key_ints)
-    minned_sum = (hist * weights)[hist.index >= config['hang_lower_bound']]
-    hang_sum = minned_sum[minned_sum.index < config['hang_upper_bound']].sum()
-    minned = hist[hist.index >= config['hang_lower_bound']]
-    hang_count = minned[minned.index < config['hang_upper_bound']].sum()
-    if hang_count > config['hang_outlier_threshold']:
+    stack, duration, thread, runnable_name, process, annotations, submission_date = hang
+    if duration < config['hang_lower_bound']:
+        return None
+    if duration >= config['hang_upper_bound']:
         return None
 
-    submission_date = hang['submission_date']
-    memory_map = hang['hang']['nativeStack']['memoryMap']
-    native_stack = hang['hang']['nativeStack']['stacks'][0]
     user_interacting = False
-    if 'annotations' in hang['hang']:
-        annotations = hang['hang']['annotations']
-        if any('UserInteracting' in a and a['UserInteracting'] == 'true' for a in annotations):
-            user_interacting = True
+    if 'UserInteracting' in annotations and annotations['UserInteracting'] == 'true':
+        user_interacting = True
 
     key = (
-        tuple((a,b) for a,b in native_stack),
-        tuple((a,b) for a,b in memory_map),
-        tuple(hang['hang']['stack']),
-        hang['runnable_name'],
-        hang['thread_name'],
+        tuple((a,b) for a,b in stack),
+        runnable_name,
+        thread,
         submission_date,
         user_interacting)
     return (key, (
-        float(hang_sum),
-        float(hang_count),
+        float(duration),
+        1.0,
     ))
-
-def get_all_pseudo_stacks(hangs, usage_hours_by_date):
-    return (hangs.map(lambda hang: get_pseudo_stack(hang, usage_hours_by_date))
-        .filter(lambda hang: hang is not None)
-        .distinct()
-        .collect())
 
 def merge_hang_data(a, b):
     return (
@@ -213,32 +162,25 @@ def merge_hang_data(a, b):
     )
 
 def process_hang_key(key, processed_modules):
-    symbolicated, percent_symbolicated = symbolicate_stacks(key[1], key[0], processed_modules)
-
-    # We only want mostly-symbolicated stacks. Anything else is A) not useful
-    # information, and B) probably a local build, which could be hanging for
-    # much different reasons.
-    if percent_symbolicated < 0.8:
-        return None
+    stack, runnable_name, thread, submission_date, user_interacting = key
+    symbolicated = symbolicate_stacks(stack, processed_modules)
 
     return (
         tuple(symbolicated),
-        key[2],
-        key[3],
-        key[4],
-        key[5],
-        key[6],
+        runnable_name,
+        thread,
+        submission_date,
+        user_interacting
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
-    usage_hours = usage_hours_by_date[key[5]]
-    return (val[0] / usage_hours, val[1] / usage_hours)
+    return val
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
     reduced = (hangs
         .map(lambda hang: map_to_hang_data(hang, config))
         .filter(lambda hang: hang is not None)
-        .reduceByKey(merge_hang_data)
+        .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
         .collect())
     items = [
         (process_hang_key(k, processed_modules), process_hang_value(k, v, usage_hours_by_date))
@@ -303,6 +245,8 @@ def get_file_URL(module, config):
 
 def process_module(module, offsets, config):
     result = []
+    if module[0] == 'pseudo':
+        return [((None, offset), (offset, '')) for offset in offsets]
     file_URL = get_file_URL(module, config)
     success, response = fetch_URL(file_URL)
     module_name, breakpad_id = module
@@ -311,7 +255,7 @@ def process_module(module, offsets, config):
         sorted_keys, sym_map = make_sym_map(response)
 
         for offset in offsets:
-            i = bisect(sorted_keys, offset)
+            i = bisect(sorted_keys, int(offset, 16))
             key = sorted_keys[i - 1] if i else None
 
             symbol = sym_map.get(key)
@@ -324,8 +268,8 @@ def process_module(module, offsets, config):
             result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
     return result
 
-def process_modules(sc, stacks_by_module, config):
-    data = sc.parallelize(stacks_by_module.iteritems())
+def process_modules(sc, frames_by_module, config):
+    data = sc.parallelize(frames_by_module.iteritems())
     return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
 
 def transform_pings(sc, pings, config):
@@ -333,16 +277,19 @@ def transform_pings(sc, pings, config):
         lambda: pings.filter(windows_only).filter(ping_is_valid))
 
     hangs = time_code("Filtering to hangs with native stacks",
-        lambda: filter_for_hangs_of_type(windows_pings_only))
+        lambda: get_all_hangs(windows_pings_only))
 
-    stacks_by_module = time_code("Getting stacks by module",
-        lambda: get_stacks_by_module(hangs))
+    frames_by_module = time_code("Getting stacks by module",
+        lambda: get_frames_by_module(hangs))
 
     processed_modules = time_code("Processing modules",
-        lambda: process_modules(sc, stacks_by_module, config))
+        lambda: process_modules(sc, frames_by_module, config))
 
-    usage_hours_by_date = time_code("Getting usage hours",
-        lambda: get_usage_hours_by_date(windows_pings_only))
+    # TODO: usage_hours_by_date is a placeholder right now until we get proper usage
+    # time in our telemetry
+    usage_hours_by_date = None
+    # usage_hours_by_date = time_code("Getting usage hours",
+    #     lambda: get_usage_hours_by_date(windows_pings_only))
 
     result = time_code("Grouping stacks",
         lambda: get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config))
@@ -455,11 +402,13 @@ def etl_job(sc, sqlContext, config=None):
     for x in xrange(0, iterations):
         day_start = time.time()
         rel_end = x * final_config['date_clumping']
-        rel_end = -rel_end - 2 ## offset by 2 because the last two build dates aren't stable
+        rel_end = -rel_end - 1
         rel_start = min((x + 1) * final_config['date_clumping'] - 1, final_config['days_to_aggregate'])
-        rel_start = -rel_start - 2 ## offset by 2 because the last two build dates aren't stable
+        rel_start = -rel_start - 1
         data = time_code("Getting data",
             lambda: get_data(sc, final_config, rel_start, rel_end))
+        if data is None:
+            continue
         transformed = transform_pings(sc, data, final_config)
         time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
