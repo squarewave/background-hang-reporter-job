@@ -140,16 +140,16 @@ def map_to_hang_data(hang, config):
     if duration >= config['hang_upper_bound']:
         return None
 
-    user_interacting = False
-    if 'UserInteracting' in annotations and annotations['UserInteracting'] == 'true':
-        user_interacting = True
+    pending_input = False
+    if 'PendingInput' in annotations:
+        pending_input = True
 
     key = (
         tuple((a,b) for a,b in stack),
         runnable_name,
         thread,
         submission_date,
-        user_interacting)
+        pending_input)
     return (key, (
         float(duration),
         1.0,
@@ -162,7 +162,7 @@ def merge_hang_data(a, b):
     )
 
 def process_hang_key(key, processed_modules):
-    stack, runnable_name, thread, submission_date, user_interacting = key
+    stack, runnable_name, thread, submission_date, pending_input = key
     symbolicated = symbolicate_stacks(stack, processed_modules)
 
     return (
@@ -170,7 +170,7 @@ def process_hang_key(key, processed_modules):
         runnable_name,
         thread,
         submission_date,
-        user_interacting
+        pending_input
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
