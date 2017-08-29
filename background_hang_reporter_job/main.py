@@ -51,6 +51,8 @@ def get_data(sc, config, start_date_relative, end_date_relative):
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
 
     properties = ["environment/system/os/name",
+                  "environment/system/os/version",
+                  "application/architecture",
                   "application/buildId",
                   "payload/modules",
                   "payload/hangs"]
@@ -59,9 +61,6 @@ def get_data(sc, config, start_date_relative, end_date_relative):
         return get_pings_properties(pings, properties, with_processes=True)
     except ValueError:
         return None
-
-def windows_only(p):
-    return p["environment/system/os/name"] == "Windows_NT"
 
 def ping_is_valid(ping):
     if not isinstance(ping["application/buildId"], basestring):
@@ -83,6 +82,10 @@ def process_hangs(ping):
     result = []
 
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
+
+    platform = "{}:{}:{}".format(ping["environment/system/os/name"],
+                                 ping["environment/system/os/version"],
+                                 ping["application/architecture"])
     # usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
     # if usage_hours == 0:
@@ -98,6 +101,7 @@ def process_hangs(ping):
         h['process'],
         h['annotations'],
         build_date,
+        platform,
     ) for h in hangs]
 
 def get_all_hangs(pings):
@@ -134,7 +138,7 @@ def symbolicate_stacks(stack, processed_modules):
     return symbolicated
 
 def map_to_hang_data(hang, config):
-    stack, duration, thread, runnable_name, process, annotations, build_date = hang
+    stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
     if duration < config['hang_lower_bound']:
         return None
     if duration >= config['hang_upper_bound']:
@@ -149,7 +153,8 @@ def map_to_hang_data(hang, config):
         runnable_name,
         thread,
         build_date,
-        pending_input)
+        pending_input,
+        platform)
 
     return (key, (
         float(duration),
@@ -163,7 +168,7 @@ def merge_hang_data(a, b):
     )
 
 def process_hang_key(key, processed_modules):
-    stack, runnable_name, thread, build_date, pending_input = key
+    stack, runnable_name, thread, build_date, pending_input, platform = key
     symbolicated = symbolicate_stacks(stack, processed_modules)
 
     return (
@@ -171,7 +176,8 @@ def process_hang_key(key, processed_modules):
         runnable_name,
         thread,
         build_date,
-        pending_input
+        pending_input,
+        platform,
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
@@ -274,11 +280,11 @@ def process_modules(sc, frames_by_module, config):
     return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
 
 def transform_pings(sc, pings, config):
-    windows_pings_only = time_code("Filtering to Windows pings",
-        lambda: pings.filter(windows_only).filter(ping_is_valid))
+    filtered = time_code("Filtering to Windows pings",
+        lambda: pings.filter(ping_is_valid))
 
     hangs = time_code("Filtering to hangs with native stacks",
-        lambda: get_all_hangs(windows_pings_only))
+        lambda: get_all_hangs(filtered))
 
     frames_by_module = time_code("Getting stacks by module",
         lambda: get_frames_by_module(hangs))
@@ -290,7 +296,7 @@ def transform_pings(sc, pings, config):
     # time in our telemetry
     usage_hours_by_date = None
     # usage_hours_by_date = time_code("Getting usage hours",
-    #     lambda: get_usage_hours_by_date(windows_pings_only))
+    #     lambda: get_usage_hours_by_date(filtered))
 
     result = time_code("Grouping stacks",
         lambda: get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config))
