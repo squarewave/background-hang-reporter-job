@@ -43,15 +43,15 @@ def get_data(sc, config, start_date_relative, end_date_relative):
 
     pings = (Dataset.from_source("telemetry")
         .where(docType='OTHER')
-        .where(submissionDate=lambda b: (b.startswith(start_date_str) or b > start_date_str)
-                                         and (b.startswith(end_date_str) or b < end_date_str))
+        .where(appBuildId=lambda b: (b.startswith(start_date_str) or b > start_date_str)
+                                     and (b.startswith(end_date_str) or b < end_date_str))
         .where(appUpdateChannel="nightly")
         .records(sc, sample=config['sample_size']))
 
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
 
     properties = ["environment/system/os/name",
-                  "meta/submissionDate",
+                  "application/buildId",
                   "payload/modules",
                   "payload/hangs"]
 
@@ -64,7 +64,7 @@ def windows_only(p):
     return p["environment/system/os/name"] == "Windows_NT"
 
 def ping_is_valid(ping):
-    if not isinstance(ping["meta/submissionDate"], basestring):
+    if not isinstance(ping["application/buildId"], basestring):
         return False
     # if type(ping["payload/info/subsessionLength"]) != int:
     #     return False
@@ -82,7 +82,7 @@ def process_stack(stack, modules):
 def process_hangs(ping):
     result = []
 
-    submission_date = ping["meta/submissionDate"][:8] # "YYYYMMDD" : 8 characters
+    build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
     # usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
     # if usage_hours == 0:
@@ -97,7 +97,7 @@ def process_hangs(ping):
         h['runnableName'],
         h['process'],
         h['annotations'],
-        submission_date,
+        build_date,
     ) for h in hangs]
 
 def get_all_hangs(pings):
@@ -134,7 +134,7 @@ def symbolicate_stacks(stack, processed_modules):
     return symbolicated
 
 def map_to_hang_data(hang, config):
-    stack, duration, thread, runnable_name, process, annotations, submission_date = hang
+    stack, duration, thread, runnable_name, process, annotations, build_date = hang
     if duration < config['hang_lower_bound']:
         return None
     if duration >= config['hang_upper_bound']:
@@ -148,8 +148,9 @@ def map_to_hang_data(hang, config):
         tuple((a,b) for a,b in stack),
         runnable_name,
         thread,
-        submission_date,
+        build_date,
         pending_input)
+
     return (key, (
         float(duration),
         1.0,
@@ -162,14 +163,14 @@ def merge_hang_data(a, b):
     )
 
 def process_hang_key(key, processed_modules):
-    stack, runnable_name, thread, submission_date, pending_input = key
+    stack, runnable_name, thread, build_date, pending_input = key
     symbolicated = symbolicate_stacks(stack, processed_modules)
 
     return (
         tuple(symbolicated),
         runnable_name,
         thread,
-        submission_date,
+        build_date,
         pending_input
     )
 
@@ -191,9 +192,9 @@ def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, c
     ]
 
 def get_usage_hours(ping):
-    submission_date = ping["meta/submissionDate"]
+    build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
     usage_hours = float(ping['payload/info/subsessionLength']) / 60.0 / 60.0
-    return (submission_date, usage_hours)
+    return (build_date, usage_hours)
 
 def merge_usage_hours(a, b):
     return a + b
