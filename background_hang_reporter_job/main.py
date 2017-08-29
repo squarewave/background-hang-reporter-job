@@ -386,7 +386,7 @@ def etl_job(sc, sqlContext, config=None):
         'print_debug_info': False,
         'hang_lower_bound': 128,
         'hang_upper_bound': 16000,
-        'stack_acceptance_threshold': 0.001,
+        'stack_acceptance_threshold': 0.01,
         'hang_outlier_threshold': 512,
         'uuid': uuid.uuid4().hex,
     }

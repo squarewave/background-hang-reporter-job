@@ -203,11 +203,17 @@ class ProfileProcessor:
             for (func_name, lib_name) in stack:
                 cache_item_index = prune_stack_cache.key_to_index((func_name, lib_name, last_cache_item_index))
                 cache_item = prune_stack_cache.index_to_item(cache_item_index)
-                if cache_item[0] / root_stack[0] > self.config['stack_acceptance_threshold']:
+                parent_cache_item = prune_stack_cache.index_to_item(last_cache_item_index)
+                if cache_item[0] / parent_cache_item[0] > self.config['stack_acceptance_threshold']:
                     last_lib_name = lib_name
                     last_stack = stack_table.key_to_index((func_name, lib_name, last_stack))
                     last_cache_item_index = cache_item_index
                 else:
+                    # If we're below the acceptance threshold, just lump it under (other) below
+                    # its parent.
+                    last_lib_name = lib_name
+                    last_stack = stack_table.key_to_index(('(other)', lib_name, last_stack))
+                    last_cache_item_index = cache_item_index
                     self.debugDump("Stripping stack {} - {} / {}".format(func_name,
                         cache_item[0], root_stack[0]))
                     break
