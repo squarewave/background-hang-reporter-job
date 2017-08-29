@@ -83,8 +83,10 @@ def process_hangs(ping):
 
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
 
+    os_version_split = ping["environment/system/os/version"].split('.')
+    os_version = os_version_split[0] if len(os_version_split) > 0 else ""
     platform = "{}:{}:{}".format(ping["environment/system/os/name"],
-                                 ping["environment/system/os/version"],
+                                 os_version,
                                  ping["application/architecture"])
     # usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
@@ -384,9 +386,9 @@ def etl_job(sc, sqlContext, config=None):
 
     final_config = {
         'days_to_aggregate': 21,
-        'date_clumping': 2,
+        'date_clumping': 1,
         'use_s3': True,
-        'sample_size': 0.05,
+        'sample_size': 0.01,
         'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
         'hang_profile_filename': 'hang_profile_128_16000',
         'print_debug_info': False,
