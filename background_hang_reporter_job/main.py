@@ -55,7 +55,8 @@ def get_data(sc, config, start_date_relative, end_date_relative):
                   "application/architecture",
                   "application/buildId",
                   "payload/modules",
-                  "payload/hangs"]
+                  "payload/hangs",
+                  "payload/timeSinceLastPing"]
 
     try:
         return get_pings_properties(pings, properties, with_processes=True)
@@ -88,10 +89,7 @@ def process_hangs(ping):
     platform = "{}:{}:{}".format(ping["environment/system/os/name"],
                                  os_version,
                                  ping["application/architecture"])
-    # usage_hours = float(ping['payload/info/subsessionLength']) / 60.0
 
-    # if usage_hours == 0:
-    #     return result
     modules = ping['payload/modules']
     hangs = ping['payload/hangs']
 
@@ -183,7 +181,8 @@ def process_hang_key(key, processed_modules):
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
-    return val
+    stack, runnable_name, thread, build_date, pending_input, platform = key
+    return (val[0] / usage_hours_by_date[build_date], val[1] / usage_hours_by_date[build_date])
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
     reduced = (hangs
@@ -201,7 +200,7 @@ def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, c
 
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
-    usage_hours = float(ping['payload/info/subsessionLength']) / 60.0 / 60.0
+    usage_hours = float(ping["payload/timeSinceLastPing"]) / 3600000.0
     return (build_date, usage_hours)
 
 def merge_usage_hours(a, b):
@@ -294,11 +293,8 @@ def transform_pings(sc, pings, config):
     processed_modules = time_code("Processing modules",
         lambda: process_modules(sc, frames_by_module, config))
 
-    # TODO: usage_hours_by_date is a placeholder right now until we get proper usage
-    # time in our telemetry
-    usage_hours_by_date = None
-    # usage_hours_by_date = time_code("Getting usage hours",
-    #     lambda: get_usage_hours_by_date(filtered))
+    usage_hours_by_date = time_code("Getting usage hours",
+        lambda: get_usage_hours_by_date(filtered))
 
     result = time_code("Grouping stacks",
         lambda: get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config))
