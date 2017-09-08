@@ -66,8 +66,8 @@ def get_data(sc, config, start_date_relative, end_date_relative):
 def ping_is_valid(ping):
     if not isinstance(ping["application/buildId"], basestring):
         return False
-    # if type(ping["payload/info/subsessionLength"]) != int:
-    #     return False
+    if type(ping["payload/timeSinceLastPing"]) != int:
+        return False
 
     return True
 
