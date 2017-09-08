@@ -24,7 +24,7 @@ from StringIO import StringIO
 from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
-REDUCE_BY_KEY_PARALLELISM = 512
+REDUCE_BY_KEY_PARALLELISM = 2001
 
 def time_code(name, fn):
     print "{}...".format(name)
@@ -381,7 +381,7 @@ def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {
-        'days_to_aggregate': 21,
+        'days_to_aggregate': 8,
         'date_clumping': 1,
         'use_s3': True,
         'sample_size': 0.01,
