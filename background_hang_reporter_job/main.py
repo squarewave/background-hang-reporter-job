@@ -128,7 +128,7 @@ def symbolicate_stacks(stack, processed_modules):
     for module, offset in stack:
         if module is not None:
             debug_name, breakpad_id = module
-            processed = processed_modules[breakpad_id, offset]
+            processed = processed_modules.get((breakpad_id, offset), None)
             if processed is not None:
                 symbolicated.append(processed)
             else:
