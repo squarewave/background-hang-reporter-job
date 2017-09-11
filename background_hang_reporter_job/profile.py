@@ -5,6 +5,71 @@ tid = 1
 pid = 1
 fake_start = 1754660864
 
+def match_exact(symbol, pattern):
+    return symbol == pattern
+
+def match_prefix(symbol, pattern):
+    return symbol.startswith(pattern)
+
+def match_substring(symbol, pattern):
+    return pattern in substring
+
+def match_stem(symbol, pattern):
+    return symbol == pattern or symbol.startswith(pattern + '(')
+
+categories = [
+  (match_stem, 'mozilla::ipc::MessageChannel::WaitForSyncNotify', 'sync_ipc'),
+  (match_stem, 'mozilla::ipc::MessageChannel::WaitForInterruptNotify', 'sync_ipc'),
+  (match_prefix, 'mozilla::places::', 'places'),
+  (match_prefix, 'mozilla::plugins::', 'plugins'),
+
+  (match_stem, 'js::RunScript', 'script'),
+  (match_stem, 'js::Nursery::collect', 'GC'),
+  (match_stem, 'js::GCRuntime::collect', 'GC'),
+  (match_stem, 'nsJSContext::GarbageCollectNow', 'GC'),
+  (match_prefix, 'mozilla::RestyleManager::', 'restyle'),
+  (match_substring, 'RestyleManager', 'restyle'),
+  (match_stem, 'mozilla::PresShell::ProcessReflowCommands', 'layout'),
+  (match_prefix, 'nsCSSFrameConstructor::', 'frameconstruction'),
+  (match_stem, 'mozilla::PresShell::DoReflow', 'layout'),
+  (match_substring, '::compileScript(', 'script'),
+
+  (match_prefix, 'nsCycleCollector', 'CC'),
+  (match_prefix, 'nsPurpleBuffer', 'CC'),
+  (match_substring, 'pthread_mutex_lock', 'wait'), # eg __GI___pthread_mutex_lock
+  (match_prefix, 'nsRefreshDriver::IsWaitingForPaint', 'paint'), # arguable, I suppose
+  (match_stem, 'mozilla::PresShell::Paint', 'paint'),
+  (match_prefix, '__poll', 'wait'),
+  (match_prefix, '__pthread_cond_wait', 'wait'),
+  (match_stem, 'mozilla::PresShell::DoUpdateApproximateFrameVisibility', 'layout'), # could just as well be paint
+  (match_substring, 'mozilla::net::', 'network'),
+  (match_stem, 'nsInputStreamReadyEvent::Run', 'network'),
+
+  # (match_stem, 'NS_ProcessNextEvent', 'eventloop'),
+  (match_stem, 'nsJSUtil::EvaluateString', 'script'),
+  (match_prefix, 'js::frontend::Parser', 'script.parse'),
+  (match_prefix, 'js::jit::IonCompile', 'script.compile.ion'),
+  (match_prefix, 'js::jit::BaselineCompiler::compile', 'script.compile.baseline'),
+
+  (match_prefix, 'CompositorBridgeParent::Composite', 'paint'),
+  (match_prefix, 'mozilla::layers::PLayerTransactionParent::Read(', 'messageread'),
+
+  (match_prefix, 'mozilla::dom::', 'dom'),
+  (match_prefix, 'nsDOMCSSDeclaration::', 'restyle'),
+  (match_prefix, 'nsHTMLDNS', 'network'),
+  (match_substring, 'IC::update(', 'script.icupdate'),
+  (match_prefix, 'js::jit::CodeGenerator::link(', 'script.link'),
+
+  (match_exact, 'base::WaitableEvent::Wait()', 'idle'),
+  # TODO - if mach_msg_trap is called by RunCurrentEventLoopInMode, then it
+  # should be considered idle time. Add a fourth entry to this tuple
+  # for child checks?
+  (match_exact, 'mach_msg_trap', 'wait'),
+
+  # Can't do this until we come up with a way of labeling ion/baseline.
+  (match_prefix, 'Interpret(', 'script.execute.interpreter'),
+]
+
 def to_struct_of_arrays(a):
     if len(a) == 0:
         raise Exception('Need at least one item in array for this to work.')
@@ -141,18 +206,84 @@ def get_default_thread(name):
         })),
     }
 
+def function_name_to_category(name):
+    existing_category = cache.get(name, None)
+    if (existing_category is not None):
+        return existing_category
+
+    for matches, pattern, category in categories:
+        if matches(name, pattern):
+            cache[name] = category
+            return category;
+
+    cache[name] = False
+    return False;
+
+def sample_categorizer(stack_table, func_table, string_array):
+    cache = {};
+
+    def compute_category(stack_index):
+        if stack_index == -1:
+            return None
+
+        func_index = stack_table['func'][stack_index]
+        name = string_array[func_table['name'][func_index]]
+        category = function_name_to_category(name)
+        if category != False or category != 'wait':
+            return category
+
+        prefix_category = categorize_sample_stack(
+            stack_table['prefix'][stack_index]
+        )
+        if category == 'wait':
+            if prefix_category is None or prefix_category == 'uncategorized':
+                return 'wait'
+
+            if prefix_category.endswith('.wait') or prefix_category == 'wait':
+                return prefix_category
+
+            return prefix_category + '.wait'
+
+        return prefix_category
+
+    stack_category_cache = {}
+
+    def categorize_sample_stack(stack_index):
+        if stack_index == -1:
+            return None
+
+        category = stack_category_cache.get(stack_index, None)
+        if category is not None:
+            return category
+
+        category = compute_category(stack_index)
+        stack_category_cache[stack_index] = category
+        return category
+
+    return categorize_sample_stack
+
 def process_thread(thread):
+    string_array = thread['stringArray'].get_items()
+    func_table = thread['funcTable'].struct_of_arrays()
+    stack_table = thread['stackTable'].struct_of_arrays()
+    categorizer = sample_categorizer(stack_table, func_table, string_array)
+
+    sample_table = thread['sampleTable'].struct_of_arrays()
+    sample_table['category'] = []
+    for s in sample_table['stack']:
+        sample_table['category'].append(categorize_sample_stack(s))
+
     return {
         'name': thread['name'],
         'processType': thread['processType'],
         'tid': thread['tid'],
         'pid': thread['pid'],
         'libs': thread['libs'].get_items(),
-        'funcTable': thread['funcTable'].struct_of_arrays(),
-        'stackTable': thread['stackTable'].struct_of_arrays(),
-        'sampleTable': thread['sampleTable'].struct_of_arrays(),
+        'funcTable': func_table,
+        'stackTable': stack_table,
+        'sampleTable': sample_table,
+        'stringArray': string_array,
         'dates': thread['dates'].get_items(),
-        'stringArray': thread['stringArray'].get_items(),
     }
 
 class ProfileProcessor:
