@@ -24,7 +24,7 @@ from StringIO import StringIO
 from profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
-REDUCE_BY_KEY_PARALLELISM = 2001
+REDUCE_BY_KEY_PARALLELISM = 4001
 
 def time_code(name, fn):
     print "{}...".format(name)
