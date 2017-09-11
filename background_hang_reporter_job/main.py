@@ -144,6 +144,9 @@ def map_to_hang_data(hang, config):
     if duration >= config['hang_upper_bound']:
         return None
 
+    if 'ExternalCPUHigh' in annotations:
+        return None
+
     pending_input = False
     if 'PendingInput' in annotations:
         pending_input = True
