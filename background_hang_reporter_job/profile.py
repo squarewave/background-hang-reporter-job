@@ -40,11 +40,8 @@ categories_p2 = [
 
     (match_prefix, 'nsCycleCollector', 'CC'),
     (match_prefix, 'nsPurpleBuffer', 'CC'),
-    (match_substring, 'pthread_mutex_lock', 'wait'), # eg __GI___pthread_mutex_lock
     (match_prefix, 'nsRefreshDriver::IsWaitingForPaint', 'paint'), # arguable, I suppose
     (match_stem, 'mozilla::PresShell::Paint', 'paint'),
-    (match_prefix, '__poll', 'wait'),
-    (match_prefix, '__pthread_cond_wait', 'wait'),
     (match_stem, 'mozilla::PresShell::DoUpdateApproximateFrameVisibility', 'layout'), # could just as well be paint
     (match_substring, 'mozilla::net::', 'network'),
     (match_stem, 'nsInputStreamReadyEvent::Run', 'network'),
@@ -65,10 +62,6 @@ categories_p2 = [
     (match_prefix, 'js::jit::CodeGenerator::link(', 'script.link'),
 
     (match_exact, 'base::WaitableEvent::Wait()', 'idle'),
-    # TODO - if mach_msg_trap is called by RunCurrentEventLoopInMode, then it
-    # should be considered idle time. Add a fourth entry to this tuple
-    # for child checks?
-    (match_exact, 'mach_msg_trap', 'wait'),
 
     # Can't do this until we come up with a way of labeling ion/baseline.
     (match_prefix, 'Interpret(', 'script.execute.interpreter'),
@@ -225,50 +218,28 @@ def sample_categorizer(categories, stack_table, func_table, string_array):
         func_name_to_category_cache[name] = False
         return False;
 
-    cache = {};
-
-    def compute_category(stack_index):
-        if stack_index is None:
-            return None
-
-        func_index = stack_table['func'][stack_index]
-        name = string_array.index_to_item(func_table['name'][func_index])
-        category = function_name_to_category(name)
-        if category != False and category != 'wait':
-            return category
-
-        if stack_table['prefix'][stack_index] == stack_index:
-            raise Exception('Malformed stack_table. stack_index: %d' % stack_index)
-
-        prefix_category = categorize_sample_stack(
-            stack_table['prefix'][stack_index]
-        )
-        if category == 'wait':
-            if prefix_category is None:
-                return 'wait'
-
-            if prefix_category.endswith('.wait') or prefix_category == 'wait':
-                return prefix_category
-
-            return prefix_category + '.wait'
-
-        return prefix_category
-
     stack_category_cache = {}
 
-    def categorize_sample_stack(stack_index):
-        if stack_index is None:
-            return None
+    def compute_category(stack_index):
+        while True:
+            if stack_index in stack_category_cache:
+                return stack_category_cache[stack_index]
+            else:
+                if stack_index is None:
+                    stack_category_cache[stack_index] = None
+                    return None
+                else:
+                    func_index = stack_table['func'][stack_index]
+                    name = string_array.index_to_item(func_table['name'][func_index])
+                    category = function_name_to_category(name)
 
-        if stack_index not in stack_category_cache:
-            category = compute_category(stack_index)
-            stack_category_cache[stack_index] = category
-        else:
-            category = stack_category_cache[stack_index]
+                if category != False:
+                    stack_category_cache[stack_index] = category
+                    return category
 
-        return category
+                stack_index = stack_table['prefix'][stack_index]
 
-    return categorize_sample_stack
+    return compute_category
 
 def process_thread(thread):
     string_array = thread['stringArray']
