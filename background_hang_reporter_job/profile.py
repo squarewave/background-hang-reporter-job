@@ -180,6 +180,10 @@ def get_default_thread(name):
 
     stack_table.key_to_index(('(root)', None, None))
 
+    prune_stack_cache = UniqueKeyedTable(lambda key: [0.0])
+    prune_stack_cache.key_to_index(('(root)', None, None))
+
+
     global tid
     global pid
 
@@ -190,6 +194,7 @@ def get_default_thread(name):
         'libs': libs,
         'funcTable': func_table,
         'stackTable': stack_table,
+        'pruneStackCache': prune_stack_cache,
         'sampleTable': sample_table,
         'stringArray': strings_table,
         'processType': 'tab' if name == 'Gecko_Child' or name == 'Gecko_Child_ForcePaint' else 'default',
@@ -293,13 +298,13 @@ class ProfileProcessor:
         ]
         print "{} filtered samples in data".format(len(data))
 
-        prune_stack_cache = UniqueKeyedTable(lambda key: [0.0])
-        root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
-
         print "Preprocessing stacks for prune cache..."
         for row in data:
             stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
 
+            thread = self.thread_table.key_to_item(thread_name)
+            prune_stack_cache = thread['pruneStackCache']
+            root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
             root_stack[0] += hang_ms
 
             last_stack = 0
@@ -316,6 +321,8 @@ class ProfileProcessor:
             stack_table = thread['stackTable']
             sample_table = thread['sampleTable']
             dates = thread['dates']
+            prune_stack_cache = thread['pruneStackCache']
+            root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
 
             last_stack = 0
             last_cache_item_index = 0
