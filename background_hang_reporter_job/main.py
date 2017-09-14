@@ -35,16 +35,12 @@ def time_code(name, fn):
     print "{} took {}ms to complete".format(name, int(round(delta * 1000)))
     return result
 
-def get_data(sc, config, start_date_relative, end_date_relative):
-    start_date = (datetime.today() + timedelta(days=start_date_relative))
-    start_date_str = start_date.strftime("%Y%m%d")
-    end_date = (datetime.today() + timedelta(days=end_date_relative))
-    end_date_str = end_date.strftime("%Y%m%d")
+def get_data(sc, config, date):
+    date_str = date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
         .where(docType='OTHER')
-        .where(appBuildId=lambda b: (b.startswith(start_date_str) or b > start_date_str)
-                                     and (b.startswith(end_date_str) or b < end_date_str))
+        .where(appBuildId=lambda b: b.startswith(date_str))
         .where(appUpdateChannel="nightly")
         .records(sc, sample=config['sample_size']))
 
@@ -346,6 +342,13 @@ def decode_response(response):
 def smart_hex(offset):
     return hex(int(offset))
 
+def read_file(name, stuff, config):
+    url = "https://analysis-output.telemetry.mozilla.org/bhr/data/hang_aggregates/" + name+ ".json"
+    success, response = fetch_URL(url)
+    if not success:
+        raise Exception("Failure to fetch url" + url)
+    return response
+
 def write_file(name, stuff, config):
     end_date = datetime.today()
     end_date_str = end_date.strftime("%Y%m%d")
@@ -362,7 +365,6 @@ def write_file(name, stuff, config):
     if config['use_s3']:
         bucket = "telemetry-public-analysis-2"
         s3_key = "bhr/data/hang_aggregates/" + name + ".json"
-        s3_uuid_key = "bhr/data/hang_aggregates/" + name + "_" + config['uuid'] + ".json"
         client = boto3.client('s3', 'us-west-2')
         transfer = S3Transfer(client)
         transfer.upload_file(gzfilename,
@@ -372,49 +374,51 @@ def write_file(name, stuff, config):
                                 'ContentType':'application/json',
                                 'ContentEncoding':'gzip'
                             })
-        transfer.upload_file(gzfilename,
-                             bucket,
-                             s3_uuid_key,
-                             extra_args={
-                                'ContentType':'application/json',
-                                'ContentEncoding':'gzip'
-                            })
+        if config['uuid'] is not None:
+            s3_uuid_key = "bhr/data/hang_aggregates/" + name + "_" + config['uuid'] + ".json"
+            transfer.upload_file(gzfilename,
+                                 bucket,
+                                 s3_uuid_key,
+                                 extra_args={
+                                    'ContentType':'application/json',
+                                    'ContentEncoding':'gzip'
+                                })
+
+default_config = {
+    'start_date': datetime.today() - timedelta(days=9),
+    'end_date': datetime.today() - timedelta(days=1),
+    'use_s3': True,
+    'sample_size': 0.50,
+    'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
+    'hang_profile_filename': 'hang_profile_128_16000',
+    'print_debug_info': False,
+    'hang_lower_bound': 128,
+    'hang_upper_bound': 16000,
+    'stack_acceptance_threshold': 0.01,
+    'hang_outlier_threshold': 512,
+    'uuid': uuid.uuid4().hex,
+}
 
 def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
-    final_config = {
-        'days_to_aggregate': 8,
-        'date_clumping': 1,
-        'use_s3': True,
-        'sample_size': 0.50,
-        'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
-        'hang_profile_filename': 'hang_profile_128_16000',
-        'print_debug_info': False,
-        'hang_lower_bound': 128,
-        'hang_upper_bound': 16000,
-        'stack_acceptance_threshold': 0.01,
-        'hang_outlier_threshold': 512,
-        'uuid': uuid.uuid4().hex,
-    }
+    final_config = {}
+    final_config.update(default_config)
 
     if config is not None:
         final_config.update(config)
 
-    iterations = (final_config['days_to_aggregate'] + final_config['date_clumping'] - 1) / final_config['date_clumping']
     profile_processor = ProfileProcessor(final_config)
 
+    iterations = (final_config['end_date'] - final_config['start_date']).days
     job_start = time.time()
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(0, iterations):
-        day_start = time.time()
-        rel_end = x * final_config['date_clumping']
-        rel_end = -rel_end - 1
-        rel_start = min((x + 1) * final_config['date_clumping'] - 1, final_config['days_to_aggregate'])
-        rel_start = -rel_start - 1
+        iteration_start = time.time()
+        current_date = final_config['start_date'] + timedelta(days = x)
         data = time_code("Getting data",
-            lambda: get_data(sc, final_config, rel_start, rel_end))
+            lambda: get_data(sc, final_config, current_date))
         if data is None:
             continue
         transformed = transform_pings(sc, data, final_config)
@@ -422,9 +426,69 @@ def etl_job(sc, sqlContext, config=None):
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
-        day_end = time.time()
-        day_delta = day_end - day_start
-        print "Iteration took {}s".format(int(round(day_delta)))
+        iteration_end = time.time()
+        iteration_delta = iteration_end - iteration_start
+        print "Iteration took {}s".format(int(round(iteration_delta)))
+        job_elapsed = time.time() - job_start
+        percent_done = float(x + 1) / float(iterations)
+        projected = job_elapsed / percent_done
+        remaining = projected - job_elapsed
+        print "Job should finish in {}".format(timedelta(seconds=remaining))
+
+    profile = profile_processor.process_into_profile()
+    write_file(final_config['hang_profile_filename'], profile, final_config)
+
+def etl_job_incremental_write(sc, sqlContext, config=None):
+    final_config = {}
+    final_config.update(default_config)
+
+    if config is not None:
+        final_config.update(config)
+
+    iterations = (final_config['end_date'] - final_config['start_date']).days
+    job_start = time.time()
+    for x in xrange(iterations):
+        iteration_start = time.time()
+        current_date = final_config['start_date'] + timedelta(days = x)
+        date_str = current_date.strftime("%Y%m%d")
+        data = time_code("Getting data",
+            lambda: get_data(sc, final_config, current_date))
+        if data is None:
+            continue
+        transformed = transform_pings(sc, data, final_config)
+        write_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
+                   transformed, final_config)
+        gc.collect()
+        iteration_end = time.time()
+        iteration_delta = iteration_end - iteration_start
+        print "Iteration for {} took {}s".format(date_str, int(round(iteration_delta)))
+        job_elapsed = time.time() - job_start
+        percent_done = float(x + 1) / float(iterations)
+        projected = job_elapsed / percent_done
+        remaining = projected - job_elapsed
+        print "Job should finish in {}".format(timedelta(seconds=remaining))
+
+def etl_job_incremental_finalize(sc, sqlContext, config=None):
+    final_config = {}
+    final_config.update(default_config)
+
+    if config is not None:
+        final_config.update(config)
+
+    profile_processor = ProfileProcessor(final_config)
+    iterations = (final_config['end_date'] - final_config['start_date']).days
+    job_start = time.time()
+    for x in xrange(iterations):
+        iteration_start = time.time()
+        current_date = final_config['start_date'] + timedelta(days = x)
+        date_str = current_date.strftime("%Y%m%d")
+        data = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
+                   profile, final_config)
+        profile_processor.ingest(data)
+        gc.collect()
+        iteration_end = time.time()
+        iteration_delta = iteration_end - iteration_start
+        print "Iteration for {} took {}s".format(date_str, int(round(iteration_delta)))
         job_elapsed = time.time() - job_start
         percent_done = float(x + 1) / float(iterations)
         projected = job_elapsed / percent_done
