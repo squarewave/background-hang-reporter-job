@@ -342,12 +342,12 @@ def decode_response(response):
 def smart_hex(offset):
     return hex(int(offset))
 
-def read_file(name, stuff, config):
-    url = "https://analysis-output.telemetry.mozilla.org/bhr/data/hang_aggregates/" + name+ ".json"
+def read_file(name):
+    url = "https://analysis-output.telemetry.mozilla.org/bhr/data/hang_aggregates/" + name + ".json"
     success, response = fetch_URL(url)
     if not success:
         raise Exception("Failure to fetch url" + url)
-    return response
+    return json.loads(response)
 
 def write_file(name, stuff, config):
     end_date = datetime.today()
@@ -482,8 +482,7 @@ def etl_job_incremental_finalize(sc, sqlContext, config=None):
         iteration_start = time.time()
         current_date = final_config['start_date'] + timedelta(days = x)
         date_str = current_date.strftime("%Y%m%d")
-        data = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
-                   profile, final_config)
+        data = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str))
         profile_processor.ingest(data)
         gc.collect()
         iteration_end = time.time()
