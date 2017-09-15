@@ -1,9 +1,4 @@
 import re
-import math
-
-tid = 1
-pid = 1
-fake_start = 1754660864
 
 def match_exact(symbol, pattern):
     return symbol == pattern
@@ -75,8 +70,8 @@ def to_struct_of_arrays(a):
     result['length'] = len(a)
     return result
 
-class UniqueKeyedTable:
-    def __init__(self, get_default_from_key, key_names = ()):
+class UniqueKeyedTable(object):
+    def __init__(self, get_default_from_key, key_names=()):
         self.get_default_from_key = get_default_from_key
         self.key_to_index_map = {}
         self.key_names = key_names
@@ -133,30 +128,13 @@ class GrowToFitList(list):
 def hexify(num):
     return "{0:#0{1}x}".format(num, 8)
 
-fake_breakpad_id_base = "D746BAF2F0C04D5E9781C9CC9"
-breakpad_id_suffix_start = 0
-
-def next_breakpad_id(key):
-    global breakpad_id_suffix_start
-    breakpad_id_suffix_start += 1
-    return fake_breakpad_id_base + hexify(breakpad_id_suffix_start)
-
-breakpad_id_table = UniqueKeyedTable(next_breakpad_id)
-
 def get_default_lib(name):
-    global fake_start
-    start = fake_start + 1
-    end = fake_start + 10000
-    fake_start += 10000
     return ({
         'name': re.sub(r'\.pdb$', '', name),
-        'start': start,
-        'end': end,
         'offset': 0,
         'path': "",
         'debugName': name,
         'debugPath': name,
-        'breakpadId': breakpad_id_table.key_to_item(name),
         'arch': "",
     })
 
@@ -183,12 +161,6 @@ def get_default_thread(name):
     prune_stack_cache = UniqueKeyedTable(lambda key: [0.0])
     prune_stack_cache.key_to_index(('(root)', None, None))
 
-
-    global tid
-    global pid
-
-    tid += 1
-    pid += 1
     return {
         'name': name,
         'libs': libs,
@@ -198,8 +170,6 @@ def get_default_thread(name):
         'sampleTable': sample_table,
         'stringArray': strings_table,
         'processType': 'tab' if name == 'Gecko_Child' or name == 'Gecko_Child_ForcePaint' else 'default',
-        'tid': tid,
-        'pid': pid,
         'time': 0.0,
         'dates': UniqueKeyedTable(lambda date: ({
             'date': date,
@@ -218,10 +188,10 @@ def sample_categorizer(categories, stack_table, func_table, string_array):
         for matches, pattern, category in categories:
             if matches(name, pattern):
                 func_name_to_category_cache[name] = category
-                return category;
+                return category
 
         func_name_to_category_cache[name] = False
-        return False;
+        return False
 
     stack_category_cache = {}
 
@@ -269,8 +239,6 @@ def process_thread(thread):
     return {
         'name': thread['name'],
         'processType': thread['processType'],
-        'tid': thread['tid'],
-        'pid': thread['pid'],
         'libs': thread['libs'].get_items(),
         'funcTable': func_table,
         'stackTable': stack_table,
@@ -279,67 +247,70 @@ def process_thread(thread):
         'dates': thread['dates'].get_items(),
     }
 
-def reconstruct_stack(string_array, func_table, stack_table, stack_index):
+def reconstruct_stack(string_array, func_table, stack_table, lib_table, stack_index):
     result = []
     while stack_index != 0:
-        func_index = stack_table['name'][stack_index]
+        func_index = stack_table['func'][stack_index]
         prefix = stack_table['prefix'][stack_index]
         func_name = string_array[func_table['name'][func_index]]
-        lib_name = string_array[func_table['lib'][func_index]]
+        lib_name = lib_table[func_table['lib'][func_index]]['debugName']
         result.append((func_name, lib_name))
         stack_index = prefix
-    return result
+    return result[::-1]
 
-class ProfileProcessor:
+class ProfileProcessor(object):
     def __init__(self, config):
         self.config = config
         self.thread_table = UniqueKeyedTable(get_default_thread)
 
-    def debugDump(self, str):
+    def debugDump(self, dump_str):
         if self.config['print_debug_info']:
-            print str
+            print dump_str
 
     def ingest_processed_profile(self, profile):
         threads = profile['threads']
         for other in threads:
             other_samples = other['sampleTable']
-            other_stacks = other['stackTable']
-            other_funcs = other['funcTable']
-            other_strings = other['string_array']
             other_dates = other['dates']
-            other_libs = other['libs']
 
             for date in other_dates:
                 build_date = date['date']
-                for i in xrange(0,len(date['sampleHangCount'])):
+                for i in xrange(0, len(date['sampleHangCount'])):
                     stack_index = other_samples['stack'][i]
-                    stack = reconstruct_stack(other_strings, other_funcs, other_stacks, stack_index)
-                    runnable_name = other_samples['runnable']
-                    thread_name = other['name']
-                    pending_input = other_samples['userInteracting'][i]
-                    platform = other_samples['platform'][i]
-                    hang_ms = date['sampleHangMs'][i]
-                    hang_count = date['sampleHangCount'][i]
-                    self.pre_ingest_row((stack, runnable_name, thread_name,
-                                         build_date, pending_input, platform,
-                                         hang_ms, hang_count))
+                    stack = reconstruct_stack(other['stringArray'],
+                                              other['funcTable'],
+                                              other['stackTable'],
+                                              other['libs'],
+                                              stack_index)
+                    self.pre_ingest_row((stack,
+                                         other_samples['runnable'],
+                                         other['name'],
+                                         build_date,
+                                         other_samples['userInteracting'][i],
+                                         other_samples['platform'][i],
+                                         date['sampleHangMs'][i],
+                                         date['sampleHangCount'][i]))
 
             for date in other_dates:
                 build_date = date['date']
-                for i in xrange(0,len(date['sampleHangCount'])):
+                for i in xrange(0, len(date['sampleHangCount'])):
                     stack_index = other_samples['stack'][i]
-                    stack = reconstruct_stack(other_strings, other_funcs, other_stacks, stack_index)
-                    runnable_name = other_samples['runnable']
-                    thread_name = other['name']
-                    pending_input = other_samples['userInteracting'][i]
-                    platform = other_samples['platform'][i]
-                    hang_ms = date['sampleHangMs'][i]
-                    hang_count = date['sampleHangCount'][i]
-                    self.ingest_row((stack, runnable_name, thread_name,
-                                     build_date, pending_input, platform,
-                                     hang_ms, hang_count))
+                    stack = reconstruct_stack(other['stringArray'],
+                                              other['funcTable'],
+                                              other['stackTable'],
+                                              other['libs'],
+                                              stack_index)
+                    self.ingest_row((stack,
+                                     other_samples['runnable'][i],
+                                     other['name'],
+                                     build_date,
+                                     other_samples['userInteracting'][i],
+                                     other_samples['platform'][i],
+                                     date['sampleHangMs'][i],
+                                     date['sampleHangCount'][i]))
 
     def pre_ingest_row(self, row):
+        #pylint: disable=unused-variable
         stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
 
         thread = self.thread_table.key_to_item(thread_name)
@@ -354,6 +325,7 @@ class ProfileProcessor:
             cache_item[0] += hang_ms
 
     def ingest_row(self, row):
+        #pylint: disable=unused-variable
         stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
 
         thread = self.thread_table.key_to_item(thread_name)
@@ -381,7 +353,8 @@ class ProfileProcessor:
                 last_stack = stack_table.key_to_index(('(other)', lib_name, last_stack))
                 last_cache_item_index = cache_item_index
                 self.debugDump("Stripping stack {} - {} / {}".format(func_name,
-                    cache_item[0], root_stack[0]))
+                                                                     cache_item[0],
+                                                                     root_stack[0]))
                 break
 
         sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))

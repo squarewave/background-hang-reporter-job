@@ -1,35 +1,31 @@
-import boto3
+
 import contextlib
 import gc
 import gzip
 import os
-import pandas as pd
-import Queue
-import sys
-import threading
 import time
-import ujson as json
 import urllib
 import urllib2
 import uuid
-
 from bisect import bisect
-from boto3.s3.transfer import S3Transfer
 from datetime import datetime, timedelta
-from moztelemetry import get_pings_properties
-from moztelemetry.dataset import Dataset
-from sets import Set
 from StringIO import StringIO
 
-from profile import ProfileProcessor
+import ujson as json
+import boto3
+from boto3.s3.transfer import S3Transfer
+from moztelemetry import get_pings_properties
+from moztelemetry.dataset import Dataset
+
+from background_hang_reporter_job.profile import ProfileProcessor
 
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 4001
 
-def time_code(name, fn):
+def time_code(name, callback):
     print "{}...".format(name)
     start = time.time()
-    result = fn()
+    result = callback()
     end = time.time()
     delta = end - start
     print "{} took {}ms to complete".format(name, int(round(delta * 1000)))
@@ -39,10 +35,10 @@ def get_data(sc, config, date):
     date_str = date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
-        .where(docType='OTHER')
-        .where(appBuildId=lambda b: b.startswith(date_str))
-        .where(appUpdateChannel="nightly")
-        .records(sc, sample=config['sample_size']))
+             .where(docType='OTHER')
+             .where(appBuildId=lambda b: b.startswith(date_str))
+             .where(appUpdateChannel="nightly")
+             .records(sc, sample=config['sample_size']))
 
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
 
@@ -62,7 +58,7 @@ def get_data(sc, config, date):
 def ping_is_valid(ping):
     if not isinstance(ping["application/buildId"], basestring):
         return False
-    if type(ping["payload/timeSinceLastPing"]) != int:
+    if not isinstance(ping["payload/timeSinceLastPing"], int):
         return False
 
     return True
@@ -76,8 +72,6 @@ def process_stack(stack, modules):
         return (('pseudo', None), stack)
 
 def process_hangs(ping):
-    result = []
-
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
 
     os_version_split = ping["environment/system/os/version"].split('.')
@@ -101,7 +95,7 @@ def process_hangs(ping):
     ) for h in hangs]
 
 def get_all_hangs(pings):
-    return pings.flatMap(lambda p: process_hangs(p))
+    return pings.flatMap(process_hangs)
 
 def map_to_frame_info(hang):
     memory_map = hang['hang']['nativeStack']['memoryMap']
@@ -113,11 +107,11 @@ def map_to_frame_info(hang):
 
 def get_frames_by_module(hangs):
     return (hangs.flatMap(lambda hang: hang[0])
-        .filter(lambda hang_tuple: hang_tuple[0] is not None)
-        .map(lambda hang_tuple: (hang_tuple[0], (hang_tuple[1],)))
-        .distinct()
-        .reduceByKey(lambda a,b: a + b, REDUCE_BY_KEY_PARALLELISM)
-        .collectAsMap())
+            .filter(lambda hang_tuple: hang_tuple[0] is not None)
+            .map(lambda hang_tuple: (hang_tuple[0], (hang_tuple[1],)))
+            .distinct()
+            .reduceByKey(lambda a, b: a + b, REDUCE_BY_KEY_PARALLELISM)
+            .collectAsMap())
 
 def symbolicate_stacks(stack, processed_modules):
     symbolicated = []
@@ -134,6 +128,7 @@ def symbolicate_stacks(stack, processed_modules):
     return symbolicated
 
 def map_to_hang_data(hang, config):
+    #pylint: disable=unused-variable
     stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
     if duration < config['hang_lower_bound']:
         return None
@@ -148,7 +143,7 @@ def map_to_hang_data(hang, config):
         pending_input = True
 
     key = (
-        tuple((a,b) for a,b in stack),
+        tuple((a, b) for a, b in stack),
         runnable_name,
         thread,
         build_date,
@@ -180,15 +175,16 @@ def process_hang_key(key, processed_modules):
     )
 
 def process_hang_value(key, val, usage_hours_by_date):
+    #pylint: disable=unused-variable
     stack, runnable_name, thread, build_date, pending_input, platform = key
     return (val[0] / usage_hours_by_date[build_date], val[1] / usage_hours_by_date[build_date])
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
     reduced = (hangs
-        .map(lambda hang: map_to_hang_data(hang, config))
-        .filter(lambda hang: hang is not None)
-        .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
-        .collect())
+               .map(lambda hang: map_to_hang_data(hang, config))
+               .filter(lambda hang: hang is not None)
+               .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
+               .collect())
     items = [
         (process_hang_key(k, processed_modules), process_hang_value(k, v, usage_hours_by_date))
         for k, v in reduced
@@ -207,8 +203,8 @@ def merge_usage_hours(a, b):
 
 def get_usage_hours_by_date(pings):
     return (pings.map(get_usage_hours)
-        .reduceByKey(merge_usage_hours, REDUCE_BY_KEY_PARALLELISM)
-        .collectAsMap())
+            .reduceByKey(merge_usage_hours, REDUCE_BY_KEY_PARALLELISM)
+            .collectAsMap())
 
 def make_sym_map(data):
     public_symbols = {}
@@ -281,47 +277,51 @@ def process_modules(sc, frames_by_module, config):
 
 def transform_pings(sc, pings, config):
     filtered = time_code("Filtering to Windows pings",
-        lambda: pings.filter(ping_is_valid))
+                         lambda: pings.filter(ping_is_valid))
 
     hangs = time_code("Filtering to hangs with native stacks",
-        lambda: get_all_hangs(filtered))
+                      lambda: get_all_hangs(filtered))
 
     frames_by_module = time_code("Getting stacks by module",
-        lambda: get_frames_by_module(hangs))
+                                 lambda: get_frames_by_module(hangs))
 
     processed_modules = time_code("Processing modules",
-        lambda: process_modules(sc, frames_by_module, config))
+                                  lambda: process_modules(sc, frames_by_module, config))
 
     usage_hours_by_date = time_code("Getting usage hours",
-        lambda: get_usage_hours_by_date(filtered))
+                                    lambda: get_usage_hours_by_date(filtered))
 
     result = time_code("Grouping stacks",
-        lambda: get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config))
+                       lambda: get_grouped_sums_and_counts(hangs,
+                                                           processed_modules,
+                                                           usage_hours_by_date, config))
     return result
 
 def fetch_URL(url):
     result = False, ""
     try:
         with contextlib.closing(urllib2.urlopen(url)) as response:
+            #pylint: disable=no-member
             responseCode = response.getcode()
             if responseCode == 404:
                 return False, ""
             if responseCode != 200:
                 result = False, ""
             return True, decode_response(response)
-    except IOError as e:
+    except IOError:
         result = False, ""
 
     if not result[0]:
         try:
             with contextlib.closing(urllib2.urlopen(url)) as response:
+                #pylint: disable=no-member
                 responseCode = response.getcode()
                 if responseCode == 404:
                     return False, ""
                 if responseCode != 200:
                     result = False, ""
                 return True, decode_response(response)
-        except IOError as e:
+        except IOError:
             result = False, ""
 
     return result
@@ -335,14 +335,16 @@ def decode_response(response):
                 with gzip.GzipFile(fileobj=data_stream) as f:
                     return f.read()
             except EnvironmentError:
+                #pylint: disable=no-member
                 data_stream.seek(0)
+                #pylint: disable=no-member
                 return data_stream.read().decode('zlib')
     return response.read()
 
 def smart_hex(offset):
     return hex(int(offset))
 
-def read_file(name):
+def read_file(name, config):
     end_date = datetime.today()
     end_date_str = end_date.strftime("%Y%m%d")
 
@@ -352,7 +354,7 @@ def read_file(name):
         filename = "./output/%s.json" % name
     gzfilename = filename + '.gz'
     with gzip.open(gzfilename, 'r') as f:
-        return json.loads(f.read(jsonblob))
+        return json.loads(f.read())
 
 def write_file(name, stuff, config):
     end_date = datetime.today()
@@ -375,22 +377,17 @@ def write_file(name, stuff, config):
         s3_key = "bhr/data/hang_aggregates/" + name + ".json"
         client = boto3.client('s3', 'us-west-2')
         transfer = S3Transfer(client)
+        extra_args = {'ContentType':'application/json', 'ContentEncoding':'gzip'}
         transfer.upload_file(gzfilename,
                              bucket,
                              s3_key,
-                             extra_args={
-                                'ContentType':'application/json',
-                                'ContentEncoding':'gzip'
-                            })
+                             extra_args=extra_args)
         if config['uuid'] is not None:
             s3_uuid_key = "bhr/data/hang_aggregates/" + name + "_" + config['uuid'] + ".json"
             transfer.upload_file(gzfilename,
                                  bucket,
                                  s3_uuid_key,
-                                 extra_args={
-                                    'ContentType':'application/json',
-                                    'ContentEncoding':'gzip'
-                                })
+                                 extra_args=extra_args)
 
 default_config = {
     'start_date': datetime.today() - timedelta(days=9),
@@ -408,17 +405,18 @@ default_config = {
     'uuid': uuid.uuid4().hex,
 }
 
-def print_progress(job_start, iterations, iteration_start, iteration_name):
+def print_progress(job_start, iterations, current_iteration,
+                   iteration_start, iteration_name):
     iteration_end = time.time()
     iteration_delta = iteration_end - iteration_start
     print "Iteration for {} took {}s".format(iteration_name, int(round(iteration_delta)))
     job_elapsed = iteration_end - job_start
-    percent_done = float(x + 1) / float(iterations)
+    percent_done = float(current_iteration + 1) / float(iterations)
     projected = job_elapsed / percent_done
     remaining = projected - job_elapsed
     print "Job should finish in {}".format(timedelta(seconds=remaining))
 
-def etl_job(sc, sqlContext, config=None):
+def etl_job(sc, _, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {}
@@ -431,13 +429,15 @@ def etl_job(sc, sqlContext, config=None):
 
     iterations = (final_config['end_date'] - final_config['start_date']).days
     job_start = time.time()
+    current_date = None
+    transformed = None
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(0, iterations):
         iteration_start = time.time()
-        current_date = final_config['start_date'] + timedelta(days = x)
+        current_date = final_config['start_date'] + timedelta(days=x)
         data = time_code("Getting data",
-            lambda: get_data(sc, final_config, current_date))
+                         lambda: get_data(sc, final_config, current_date))
         if data is None:
             continue
         transformed = transform_pings(sc, data, final_config)
@@ -445,12 +445,12 @@ def etl_job(sc, sqlContext, config=None):
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
-        print_progress(job_start, iterations, iteration_start, x)
+        print_progress(job_start, iterations, x, iteration_start, x)
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
 
-def etl_job_incremental_write(sc, sqlContext, config=None):
+def etl_job_incremental_write(sc, _, config=None):
     final_config = {}
     final_config.update(default_config)
 
@@ -459,12 +459,14 @@ def etl_job_incremental_write(sc, sqlContext, config=None):
 
     iterations = (final_config['end_date'] - final_config['start_date']).days
     job_start = time.time()
+    current_date = None
+    transformed = None
     for x in xrange(iterations):
         iteration_start = time.time()
-        current_date = final_config['start_date'] + timedelta(days = x)
+        current_date = final_config['start_date'] + timedelta(days=x)
         date_str = current_date.strftime("%Y%m%d")
         data = time_code("Getting data",
-            lambda: get_data(sc, final_config, current_date))
+                         lambda: get_data(sc, final_config, current_date))
         if data is None:
             continue
         transformed = transform_pings(sc, data, final_config)
@@ -474,9 +476,9 @@ def etl_job_incremental_write(sc, sqlContext, config=None):
         write_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
                    profile, final_config)
         gc.collect()
-        print_progress(job_start, iterations, iteration_start, date_str)
+        print_progress(job_start, iterations, x, iteration_start, date_str)
 
-def etl_job_incremental_finalize(sc, sqlContext, config=None):
+def etl_job_incremental_finalize(_, __, config=None):
     final_config = {}
     final_config.update(default_config)
 
@@ -486,14 +488,16 @@ def etl_job_incremental_finalize(sc, sqlContext, config=None):
     profile_processor = ProfileProcessor(final_config)
     iterations = (final_config['end_date'] - final_config['start_date']).days
     job_start = time.time()
+    current_date = None
     for x in xrange(iterations):
         iteration_start = time.time()
-        current_date = final_config['start_date'] + timedelta(days = x)
+        current_date = final_config['start_date'] + timedelta(days=x)
         date_str = current_date.strftime("%Y%m%d")
-        profile = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str))
+        profile = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
+                            final_config)
         profile_processor.ingest_processed_profile(profile)
         gc.collect()
-        print_progress(job_start, iterations, iteration_start, date_str)
+        print_progress(job_start, iterations, x, iteration_start, date_str)
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
