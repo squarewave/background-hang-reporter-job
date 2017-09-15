@@ -18,6 +18,7 @@ from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
 from background_hang_reporter_job.profile import ProfileProcessor
+import background_hang_reporter_job.crashes as crashes
 
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 4001
@@ -32,12 +33,15 @@ def time_code(name, callback):
     return result
 
 def get_data(sc, config, date):
+    if config['TMP_use_crashes']:
+        return crashes.get_data(sc, config, date)
+
     date_str = date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
              .where(docType='OTHER')
              .where(appBuildId=lambda b: b.startswith(date_str))
-             .where(appUpdateChannel="nightly")
+             .where(appUpdateChannel=config['channel'])
              .records(sc, sample=config['sample_size']))
 
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
@@ -56,6 +60,10 @@ def get_data(sc, config, date):
         return None
 
 def ping_is_valid(ping):
+    if not isinstance(ping["environment/system/os/version"], basestring):
+        return False
+    if not isinstance(ping["environment/system/os/name"], basestring):
+        return False
     if not isinstance(ping["application/buildId"], basestring):
         return False
     if not isinstance(ping["payload/timeSinceLastPing"], int):
@@ -402,6 +410,8 @@ default_config = {
     'stack_acceptance_threshold': 0.01,
     'hang_outlier_threshold': 512,
     'append_date': False,
+    'channel': 'nightly',
+    'TMP_use_crashes': False,
     'uuid': uuid.uuid4().hex,
 }
 
