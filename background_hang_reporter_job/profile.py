@@ -205,7 +205,7 @@ def get_default_thread(name):
             'date': date,
             'sampleHangMs': GrowToFitList(),
             'sampleHangCount': GrowToFitList()
-        })),
+        }), ('date', 'sampleHangMs', 'sampleHangCount')),
     }
 
 def sample_categorizer(categories, stack_table, func_table, string_array):
@@ -279,6 +279,17 @@ def process_thread(thread):
         'dates': thread['dates'].get_items(),
     }
 
+def reconstruct_stack(string_array, func_table, stack_table, stack_index):
+    result = []
+    while stack_index != 0:
+        func_index = stack_table['name'][stack_index]
+        prefix = stack_table['prefix'][stack_index]
+        func_name = string_array[func_table['name'][func_index]]
+        lib_name = string_array[func_table['lib'][func_index]]
+        result.append((func_name, lib_name))
+        stack_index = prefix
+    return result
+
 class ProfileProcessor:
     def __init__(self, config):
         self.config = config
@@ -287,6 +298,101 @@ class ProfileProcessor:
     def debugDump(self, str):
         if self.config['print_debug_info']:
             print str
+
+    def ingest_processed_profile(self, profile):
+        threads = profile['threads']
+        for other in threads:
+            other_samples = other['sampleTable']
+            other_stacks = other['stackTable']
+            other_funcs = other['funcTable']
+            other_strings = other['string_array']
+            other_dates = other['dates']
+            other_libs = other['libs']
+
+            for date in other_dates:
+                build_date = date['date']
+                for i in xrange(0,len(date['sampleHangCount'])):
+                    stack_index = other_samples['stack'][i]
+                    stack = reconstruct_stack(other_strings, other_funcs, other_stacks, stack_index)
+                    runnable_name = other_samples['runnable']
+                    thread_name = other['name']
+                    pending_input = other_samples['userInteracting'][i]
+                    platform = other_samples['platform'][i]
+                    hang_ms = date['sampleHangMs'][i]
+                    hang_count = date['sampleHangCount'][i]
+                    self.pre_ingest_row((stack, runnable_name, thread_name,
+                                         build_date, pending_input, platform,
+                                         hang_ms, hang_count))
+
+            for date in other_dates:
+                build_date = date['date']
+                for i in xrange(0,len(date['sampleHangCount'])):
+                    stack_index = other_samples['stack'][i]
+                    stack = reconstruct_stack(other_strings, other_funcs, other_stacks, stack_index)
+                    runnable_name = other_samples['runnable']
+                    thread_name = other['name']
+                    pending_input = other_samples['userInteracting'][i]
+                    platform = other_samples['platform'][i]
+                    hang_ms = date['sampleHangMs'][i]
+                    hang_count = date['sampleHangCount'][i]
+                    self.ingest_row((stack, runnable_name, thread_name,
+                                     build_date, pending_input, platform,
+                                     hang_ms, hang_count))
+
+    def pre_ingest_row(self, row):
+        stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
+
+        thread = self.thread_table.key_to_item(thread_name)
+        prune_stack_cache = thread['pruneStackCache']
+        root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
+        root_stack[0] += hang_ms
+
+        last_stack = 0
+        for (func_name, lib_name) in stack:
+            last_stack = prune_stack_cache.key_to_index((func_name, lib_name, last_stack))
+            cache_item = prune_stack_cache.index_to_item(last_stack)
+            cache_item[0] += hang_ms
+
+    def ingest_row(self, row):
+        stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
+
+        thread = self.thread_table.key_to_item(thread_name)
+        stack_table = thread['stackTable']
+        sample_table = thread['sampleTable']
+        dates = thread['dates']
+        prune_stack_cache = thread['pruneStackCache']
+        root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
+
+        last_stack = 0
+        last_cache_item_index = 0
+        last_lib_name = None
+        for (func_name, lib_name) in stack:
+            cache_item_index = prune_stack_cache.key_to_index((func_name, lib_name, last_cache_item_index))
+            cache_item = prune_stack_cache.index_to_item(cache_item_index)
+            parent_cache_item = prune_stack_cache.index_to_item(last_cache_item_index)
+            if cache_item[0] / parent_cache_item[0] > self.config['stack_acceptance_threshold']:
+                last_lib_name = lib_name
+                last_stack = stack_table.key_to_index((func_name, lib_name, last_stack))
+                last_cache_item_index = cache_item_index
+            else:
+                # If we're below the acceptance threshold, just lump it under (other) below
+                # its parent.
+                last_lib_name = lib_name
+                last_stack = stack_table.key_to_index(('(other)', lib_name, last_stack))
+                last_cache_item_index = cache_item_index
+                self.debugDump("Stripping stack {} - {} / {}".format(func_name,
+                    cache_item[0], root_stack[0]))
+                break
+
+        sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))
+
+        date = dates.key_to_item(build_date)
+        if date['sampleHangMs'][sample_index] is None:
+            date['sampleHangMs'][sample_index] = 0.0
+            date['sampleHangCount'][sample_index] = 0
+
+        date['sampleHangMs'][sample_index] += hang_ms
+        date['sampleHangCount'][sample_index] += hang_count
 
     def ingest(self, data):
         print "{} unfiltered samples in data".format(len(data))
@@ -300,60 +406,11 @@ class ProfileProcessor:
 
         print "Preprocessing stacks for prune cache..."
         for row in data:
-            stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
-
-            thread = self.thread_table.key_to_item(thread_name)
-            prune_stack_cache = thread['pruneStackCache']
-            root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
-            root_stack[0] += hang_ms
-
-            last_stack = 0
-            for (func_name, lib_name) in stack:
-                cache_item = prune_stack_cache.key_to_item((func_name, lib_name, last_stack))
-                last_stack = prune_stack_cache.key_to_index((func_name, lib_name, last_stack))
-                cache_item[0] += hang_ms
+            self.pre_ingest_row(row)
 
         print "Processing stacks..."
         for row in data:
-            stack, runnable_name, thread_name, build_date, pending_input, platform, hang_ms, hang_count = row
-
-            thread = self.thread_table.key_to_item(thread_name)
-            stack_table = thread['stackTable']
-            sample_table = thread['sampleTable']
-            dates = thread['dates']
-            prune_stack_cache = thread['pruneStackCache']
-            root_stack = prune_stack_cache.key_to_item(('(root)', None, None))
-
-            last_stack = 0
-            last_cache_item_index = 0
-            last_lib_name = None
-            for (func_name, lib_name) in stack:
-                cache_item_index = prune_stack_cache.key_to_index((func_name, lib_name, last_cache_item_index))
-                cache_item = prune_stack_cache.index_to_item(cache_item_index)
-                parent_cache_item = prune_stack_cache.index_to_item(last_cache_item_index)
-                if cache_item[0] / parent_cache_item[0] > self.config['stack_acceptance_threshold']:
-                    last_lib_name = lib_name
-                    last_stack = stack_table.key_to_index((func_name, lib_name, last_stack))
-                    last_cache_item_index = cache_item_index
-                else:
-                    # If we're below the acceptance threshold, just lump it under (other) below
-                    # its parent.
-                    last_lib_name = lib_name
-                    last_stack = stack_table.key_to_index(('(other)', lib_name, last_stack))
-                    last_cache_item_index = cache_item_index
-                    self.debugDump("Stripping stack {} - {} / {}".format(func_name,
-                        cache_item[0], root_stack[0]))
-                    break
-
-            sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))
-
-            date = dates.key_to_item(build_date)
-            if date['sampleHangMs'][sample_index] is None:
-                date['sampleHangMs'][sample_index] = 0.0
-                date['sampleHangCount'][sample_index] = 0
-
-            date['sampleHangMs'][sample_index] += hang_ms
-            date['sampleHangCount'][sample_index] += hang_count
+            self.ingest_row(row)
 
     def process_into_profile(self):
         print "Processing into final format..."

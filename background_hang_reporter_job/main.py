@@ -343,17 +343,25 @@ def smart_hex(offset):
     return hex(int(offset))
 
 def read_file(name):
-    url = "https://analysis-output.telemetry.mozilla.org/bhr/data/hang_aggregates/" + name + ".json"
-    success, response = fetch_URL(url)
-    if not success:
-        raise Exception("Failure to fetch url" + url)
-    return json.loads(response)
+    end_date = datetime.today()
+    end_date_str = end_date.strftime("%Y%m%d")
+
+    if config['append_date']:
+        filename = "./output/%s-%s.json" % (name, end_date_str)
+    else:
+        filename = "./output/%s.json" % name
+    gzfilename = filename + '.gz'
+    with gzip.open(gzfilename, 'r') as f:
+        return json.loads(f.read(jsonblob))
 
 def write_file(name, stuff, config):
     end_date = datetime.today()
     end_date_str = end_date.strftime("%Y%m%d")
 
-    filename = "./output/%s-%s.json" % (name, end_date_str)
+    if config['append_date']:
+        filename = "./output/%s-%s.json" % (name, end_date_str)
+    else:
+        filename = "./output/%s.json" % name
     gzfilename = filename + '.gz'
     jsonblob = json.dumps(stuff, ensure_ascii=False)
 
@@ -396,8 +404,19 @@ default_config = {
     'hang_upper_bound': 16000,
     'stack_acceptance_threshold': 0.01,
     'hang_outlier_threshold': 512,
+    'append_date': False,
     'uuid': uuid.uuid4().hex,
 }
+
+def print_progress(job_start, iterations, iteration_start, iteration_name):
+    iteration_end = time.time()
+    iteration_delta = iteration_end - iteration_start
+    print "Iteration for {} took {}s".format(iteration_name, int(round(iteration_delta)))
+    job_elapsed = iteration_end - job_start
+    percent_done = float(x + 1) / float(iterations)
+    projected = job_elapsed / percent_done
+    remaining = projected - job_elapsed
+    print "Job should finish in {}".format(timedelta(seconds=remaining))
 
 def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
@@ -426,14 +445,7 @@ def etl_job(sc, sqlContext, config=None):
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
-        iteration_end = time.time()
-        iteration_delta = iteration_end - iteration_start
-        print "Iteration took {}s".format(int(round(iteration_delta)))
-        job_elapsed = time.time() - job_start
-        percent_done = float(x + 1) / float(iterations)
-        projected = job_elapsed / percent_done
-        remaining = projected - job_elapsed
-        print "Job should finish in {}".format(timedelta(seconds=remaining))
+        print_progress(job_start, iterations, iteration_start, x)
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
@@ -456,17 +468,13 @@ def etl_job_incremental_write(sc, sqlContext, config=None):
         if data is None:
             continue
         transformed = transform_pings(sc, data, final_config)
+        profile_processor = ProfileProcessor(final_config)
+        profile_processor.ingest(transformed)
+        profile = profile_processor.process_into_profile()
         write_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
-                   transformed, final_config)
+                   profile, final_config)
         gc.collect()
-        iteration_end = time.time()
-        iteration_delta = iteration_end - iteration_start
-        print "Iteration for {} took {}s".format(date_str, int(round(iteration_delta)))
-        job_elapsed = time.time() - job_start
-        percent_done = float(x + 1) / float(iterations)
-        projected = job_elapsed / percent_done
-        remaining = projected - job_elapsed
-        print "Job should finish in {}".format(timedelta(seconds=remaining))
+        print_progress(job_start, iterations, iteration_start, date_str)
 
 def etl_job_incremental_finalize(sc, sqlContext, config=None):
     final_config = {}
@@ -482,17 +490,10 @@ def etl_job_incremental_finalize(sc, sqlContext, config=None):
         iteration_start = time.time()
         current_date = final_config['start_date'] + timedelta(days = x)
         date_str = current_date.strftime("%Y%m%d")
-        data = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str))
-        profile_processor.ingest(data)
+        profile = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str))
+        profile_processor.ingest_processed_profile(profile)
         gc.collect()
-        iteration_end = time.time()
-        iteration_delta = iteration_end - iteration_start
-        print "Iteration for {} took {}s".format(date_str, int(round(iteration_delta)))
-        job_elapsed = time.time() - job_start
-        percent_done = float(x + 1) / float(iterations)
-        projected = job_elapsed / percent_done
-        remaining = projected - job_elapsed
-        print "Job should finish in {}".format(timedelta(seconds=remaining))
+        print_progress(job_start, iterations, iteration_start, date_str)
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_filename'], profile, final_config)
