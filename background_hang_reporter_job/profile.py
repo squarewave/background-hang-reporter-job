@@ -200,7 +200,7 @@ def sample_categorizer(categories, stack_table, func_table, string_array):
             if stack_index in stack_category_cache:
                 return stack_category_cache[stack_index]
             else:
-                if stack_index is None:
+                if not stack_index:
                     stack_category_cache[stack_index] = None
                     return None
                 else:

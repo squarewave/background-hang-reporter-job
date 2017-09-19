@@ -269,12 +269,9 @@ def process_module(module, offsets, config):
             i = bisect(sorted_keys, int(offset, 16))
             key = sorted_keys[i - 1] if i else None
 
-            if key is not None:
-                symbol = sym_map.get(key)
-                if symbol is not None:
-                    result.append(((breakpad_id, offset), (symbol, module_name)))
-                else:
-                    result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
+            symbol = sym_map.get(key)
+            if symbol is not None:
+                result.append(((breakpad_id, offset), (symbol, module_name)))
             else:
                 result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
     else:
