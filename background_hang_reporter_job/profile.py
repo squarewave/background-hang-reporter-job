@@ -268,6 +268,11 @@ class ProfileProcessor(object):
             print dump_str
 
     def ingest_processed_profile(self, profile):
+        for existing_thread in self.thread_table.get_items():
+            prune_stack_cache = UniqueKeyedTable(lambda key: [0.0])
+            prune_stack_cache.key_to_index(('(root)', None, None))
+            existing_thread['pruneStackCache'] = prune_stack_cache
+
         threads = profile['threads']
         for other in threads:
             other_samples = other['sampleTable']
