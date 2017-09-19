@@ -71,13 +71,13 @@ def ping_is_valid(ping):
 
     return True
 
-def process_stack(stack, modules):
-    if isinstance(stack, list):
-        if stack[0] == -1 or stack[0] is None:
-            return (None, stack[1])
-        return ((modules[stack[0]][0], modules[stack[0]][1]), stack[1])
+def process_frame(frame, modules):
+    if isinstance(frame, list):
+        if frame[0] == -1 or frame[0] is None:
+            return (None, frame[1])
+        return ((modules[frame[0]][0], modules[frame[0]][1]), frame[1])
     else:
-        return (('pseudo', None), stack)
+        return (('pseudo', None), frame)
 
 def process_hangs(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
@@ -92,7 +92,7 @@ def process_hangs(ping):
     hangs = ping['payload/hangs']
 
     return [(
-        [process_stack(s, modules) for s in h['stack']],
+        [process_frame(frame, modules) for frame in h['stack']],
         h['duration'],
         h['thread'],
         h['runnableName'],
@@ -348,9 +348,6 @@ def decode_response(response):
                 #pylint: disable=no-member
                 return data_stream.read().decode('zlib')
     return response.read()
-
-def smart_hex(offset):
-    return hex(int(offset))
 
 def read_file(name, config):
     end_date = datetime.today()

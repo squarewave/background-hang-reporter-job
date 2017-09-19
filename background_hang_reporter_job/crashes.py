@@ -1,14 +1,19 @@
 from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
-def map_frame(frame):
+def map_frame(frame, modules):
     if 'ip' not in frame:
         return None
     if 'module_index' not in frame:
         return None
     offset = int(frame['ip'], 16)
-    module = frame['module_index']
-    return (module, offset)
+    module_index = frame['module_index']
+    if module_index is None:
+        return None
+    if modules is not None and module_index >= 0 and module_index < len(modules):
+        if 'base_addr' in modules[module_index]:
+            offset -= int(modules[module_index]['base_addr'], 16)
+    return [module_index, hex(offset)]
 
 def get_payload_hangs(ping):
     if ping["payload/stackTraces/threads"] is None:
@@ -17,9 +22,14 @@ def get_payload_hangs(ping):
         return []
     crash_thread = ping["payload/stackTraces/threads"][ping["payload/stackTraces/crash_info/crashing_thread"]]
     frames = crash_thread['frames']
-    stack = [map_frame(f) for f in frames if f is not None]
+    modules = get_payload_modules(ping)
+
+    stack = [
+        map_frame(f, ping["payload/stackTraces/modules"])
+        for f in reversed(frames)
+    ]
     return [{
-        'stack': stack,
+        'stack': [f for f in stack if f is not None],
         'duration': 1,
         'thread': ping['payload/processType'],
         'runnableName': 'dummy_runnable',
@@ -31,7 +41,7 @@ def get_payload_modules(ping):
     crash_modules = ping["payload/stackTraces/modules"]
     if crash_modules is None:
         return []
-    return [(m['debug_file'], m['debug_id']) for m in crash_modules]
+    return [[m['debug_file'], m['debug_id']] for m in crash_modules]
 
 def map_to_hang_format(ping):
     return {
