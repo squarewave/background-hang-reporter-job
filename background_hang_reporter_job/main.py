@@ -403,7 +403,8 @@ default_config = {
     'use_s3': True,
     'sample_size': 0.50,
     'symbol_server_url': "https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/",
-    'hang_profile_filename': 'hang_profile_128_16000',
+    'hang_profile_in_filename': 'hang_profile_128_16000',
+    'hang_profile_out_filename': None,
     'print_debug_info': False,
     'hang_lower_bound': 128,
     'hang_upper_bound': 16000,
@@ -435,6 +436,9 @@ def etl_job(sc, _, config=None):
     if config is not None:
         final_config.update(config)
 
+    if final_config['hang_profile_out_filename'] is None:
+        final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
+
     profile_processor = ProfileProcessor(final_config)
 
     iterations = (final_config['end_date'] - final_config['start_date']).days
@@ -458,7 +462,7 @@ def etl_job(sc, _, config=None):
         print_progress(job_start, iterations, x, iteration_start, x)
 
     profile = profile_processor.process_into_profile()
-    write_file(final_config['hang_profile_filename'], profile, final_config)
+    write_file(final_config['hang_profile_out_filename'], profile, final_config)
 
 def etl_job_incremental_write(sc, _, config=None):
     final_config = {}
@@ -483,7 +487,7 @@ def etl_job_incremental_write(sc, _, config=None):
         profile_processor = ProfileProcessor(final_config)
         profile_processor.ingest(transformed)
         profile = profile_processor.process_into_profile()
-        write_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
+        write_file("%s_incremental_%s" % (final_config['hang_profile_out_filename'], date_str),
                    profile, final_config)
         gc.collect()
         print_progress(job_start, iterations, x, iteration_start, date_str)
@@ -503,11 +507,11 @@ def etl_job_incremental_finalize(_, __, config=None):
         iteration_start = time.time()
         current_date = final_config['start_date'] + timedelta(days=x)
         date_str = current_date.strftime("%Y%m%d")
-        profile = read_file("%s_incremental_%s" % (final_config['hang_profile_filename'], date_str),
+        profile = read_file("%s_incremental_%s" % (final_config['hang_profile_in_filename'], date_str),
                             final_config)
         profile_processor.ingest_processed_profile(profile)
         gc.collect()
         print_progress(job_start, iterations, x, iteration_start, date_str)
 
     profile = profile_processor.process_into_profile()
-    write_file(final_config['hang_profile_filename'], profile, final_config)
+    write_file(final_config['hang_profile_out_filename'], profile, final_config)
