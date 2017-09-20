@@ -243,6 +243,8 @@ def make_sym_map(data):
 
 def get_file_URL(module, config):
     lib_name, breakpad_id = module
+    if lib_name is None or breakpad_id is None:
+        return None
     if lib_name.endswith(".pdb"):
         file_name = lib_name[:-4] + ".sym"
     else:
@@ -259,8 +261,11 @@ def process_module(module, offsets, config):
     if module[0] == 'pseudo':
         return [((None, offset), (offset, '')) for offset in offsets]
     file_URL = get_file_URL(module, config)
-    success, response = fetch_URL(file_URL)
     module_name, breakpad_id = module
+    if file_URL:
+        success, response = fetch_URL(file_URL)
+    else:
+        success = False
 
     if success:
         sorted_keys, sym_map = make_sym_map(response)
@@ -468,6 +473,9 @@ def etl_job_incremental_write(sc, _, config=None):
     if config is not None:
         final_config.update(config)
 
+    if final_config['hang_profile_out_filename'] is None:
+        final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
+
     iterations = (final_config['end_date'] - final_config['start_date']).days
     job_start = time.time()
     current_date = None
@@ -495,6 +503,9 @@ def etl_job_incremental_finalize(_, __, config=None):
 
     if config is not None:
         final_config.update(config)
+
+    if final_config['hang_profile_out_filename'] is None:
+        final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
 
     profile_processor = ProfileProcessor(final_config)
     iterations = (final_config['end_date'] - final_config['start_date']).days

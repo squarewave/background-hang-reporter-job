@@ -22,7 +22,6 @@ def get_payload_hangs(ping):
         return []
     crash_thread = ping["payload/stackTraces/threads"][ping["payload/stackTraces/crash_info/crashing_thread"]]
     frames = crash_thread['frames']
-    modules = get_payload_modules(ping)
 
     stack = [
         map_frame(f, ping["payload/stackTraces/modules"])
@@ -41,7 +40,7 @@ def get_payload_modules(ping):
     crash_modules = ping["payload/stackTraces/modules"]
     if crash_modules is None:
         return []
-    return [[m['debug_file'], m['debug_id']] for m in crash_modules]
+    return [[m.get('debug_file', None), m.get('debug_id', None)] for m in crash_modules]
 
 def map_to_hang_format(ping):
     return {
