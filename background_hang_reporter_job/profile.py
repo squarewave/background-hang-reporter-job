@@ -261,7 +261,7 @@ def reconstruct_stack(string_array, func_table, stack_table, lib_table, stack_in
 
 def merge_number_dicts(a, b):
     keys = Set(a.keys() + b.keys())
-    return {k: a[k] + b[k] for k in keys}
+    return {k: a.get(k, 0.) + b.get(k, 0.) for k in keys}
 
 class ProfileProcessor(object):
     def __init__(self, config):
@@ -319,7 +319,7 @@ class ProfileProcessor(object):
                                      other_samples['platform'][i],
                                      date['sampleHangMs'][i],
                                      date['sampleHangCount'][i]))
-        self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, profile['usageHoursByDate'])
+        self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, profile.get('usageHoursByDate', {}))
 
     def pre_ingest_row(self, row):
         #pylint: disable=unused-variable

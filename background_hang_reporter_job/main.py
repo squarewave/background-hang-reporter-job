@@ -358,13 +358,21 @@ def read_file(name, config):
     end_date = datetime.today()
     end_date_str = end_date.strftime("%Y%m%d")
 
-    if config['append_date']:
-        filename = "./output/%s-%s.json" % (name, end_date_str)
+    if config['read_files_from_network']:
+        s3_key = "bhr/data/hang_aggregates/" + name + ".json"
+        url = config['analysis_output_url'] + s3_key
+        success, response = fetch_URL(url)
+        if not success:
+            raise Exception('Could not find file at url: ' + url)
+        return json.loads(response)
     else:
-        filename = "./output/%s.json" % name
-    gzfilename = filename + '.gz'
-    with gzip.open(gzfilename, 'r') as f:
-        return json.loads(f.read())
+        if config['append_date']:
+            filename = "./output/%s-%s.json" % (name, end_date_str)
+        else:
+            filename = "./output/%s.json" % name
+        gzfilename = filename + '.gz'
+        with gzip.open(gzfilename, 'r') as f:
+            return json.loads(f.read())
 
 def write_file(name, stuff, config):
     end_date = datetime.today()
@@ -414,6 +422,8 @@ default_config = {
     'hang_outlier_threshold': 512,
     'append_date': False,
     'channel': 'nightly',
+    'analysis_output_url': 'https://analysis-output.telemetry.mozilla.org/',
+    'read_files_from_network': False,
     'TMP_use_crashes': False,
     'uuid': uuid.uuid4().hex,
 }
