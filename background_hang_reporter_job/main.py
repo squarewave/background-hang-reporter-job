@@ -73,7 +73,7 @@ def ping_is_valid(ping):
 
 def process_frame(frame, modules):
     if isinstance(frame, list):
-        if frame[0] == -1 or frame[0] is None:
+        if frame[0] < 0 or frame[0] >= len(modules) or frame[0] is None:
             return (None, frame[1])
         return ((modules[frame[0]][0], modules[frame[0]][1]), frame[1])
     else:
