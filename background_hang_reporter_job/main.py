@@ -308,7 +308,7 @@ def transform_pings(sc, pings, config):
                        lambda: get_grouped_sums_and_counts(hangs,
                                                            processed_modules,
                                                            usage_hours_by_date, config))
-    return result
+    return result, usage_hours_by_date
 
 def fetch_URL(url):
     result = False, ""
@@ -447,6 +447,7 @@ def etl_job(sc, _, config=None):
     job_start = time.time()
     current_date = None
     transformed = None
+    usage_hours = None
     # We were OOMing trying to allocate a contiguous array for all of this. Pass it in
     # bit by bit to the profile processor and hope it can handle it.
     for x in xrange(0, iterations):
@@ -456,8 +457,8 @@ def etl_job(sc, _, config=None):
                          lambda: get_data(sc, final_config, current_date))
         if data is None:
             continue
-        transformed = transform_pings(sc, data, final_config)
-        time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed))
+        transformed, usage_hours = transform_pings(sc, data, final_config)
+        time_code("Passing stacks to processor", lambda: profile_processor.ingest(transformed, usage_hours))
         # Run a collection to ensure that any references to any RDDs are cleaned up,
         # allowing the JVM to clean them up on its end.
         gc.collect()
@@ -480,6 +481,7 @@ def etl_job_incremental_write(sc, _, config=None):
     job_start = time.time()
     current_date = None
     transformed = None
+    usage_hours = None
     for x in xrange(iterations):
         iteration_start = time.time()
         current_date = final_config['start_date'] + timedelta(days=x)
@@ -488,9 +490,9 @@ def etl_job_incremental_write(sc, _, config=None):
                          lambda: get_data(sc, final_config, current_date))
         if data is None:
             continue
-        transformed = transform_pings(sc, data, final_config)
+        transformed, usage_hours = transform_pings(sc, data, final_config)
         profile_processor = ProfileProcessor(final_config)
-        profile_processor.ingest(transformed)
+        profile_processor.ingest(transformed, usage_hours)
         profile = profile_processor.process_into_profile()
         write_file("%s_incremental_%s" % (final_config['hang_profile_out_filename'], date_str),
                    profile, final_config)

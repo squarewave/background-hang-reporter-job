@@ -1,4 +1,5 @@
 import re
+from sets import Set
 
 def match_exact(symbol, pattern):
     return symbol == pattern
@@ -258,10 +259,15 @@ def reconstruct_stack(string_array, func_table, stack_table, lib_table, stack_in
         stack_index = prefix
     return result[::-1]
 
+def merge_number_dicts(a, b):
+    keys = Set(a.keys() + b.keys())
+    return {k: a[k] + b[k] for k in keys}
+
 class ProfileProcessor(object):
     def __init__(self, config):
         self.config = config
         self.thread_table = UniqueKeyedTable(get_default_thread)
+        self.usage_hours_by_date = {}
 
     def debugDump(self, dump_str):
         if self.config['print_debug_info']:
@@ -313,6 +319,7 @@ class ProfileProcessor(object):
                                      other_samples['platform'][i],
                                      date['sampleHangMs'][i],
                                      date['sampleHangCount'][i]))
+        self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, profile['usageHoursByDate'])
 
     def pre_ingest_row(self, row):
         #pylint: disable=unused-variable
@@ -372,7 +379,7 @@ class ProfileProcessor(object):
         date['sampleHangMs'][sample_index] += hang_ms
         date['sampleHangCount'][sample_index] += hang_count
 
-    def ingest(self, data):
+    def ingest(self, data, usage_hours_by_date):
         print "{} unfiltered samples in data".format(len(data))
         data = [
             x
@@ -390,9 +397,12 @@ class ProfileProcessor(object):
         for row in data:
             self.ingest_row(row)
 
+        self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, usage_hours_by_date)
+
     def process_into_profile(self):
         print "Processing into final format..."
         return {
             'threads': [process_thread(t) for t in self.thread_table.get_items()],
+            'usageHoursByDate': self.usage_hours_by_date,
             'uuid': self.config['uuid'],
         }
