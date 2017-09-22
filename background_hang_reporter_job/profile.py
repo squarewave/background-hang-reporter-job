@@ -294,11 +294,11 @@ class ProfileProcessor(object):
                                               other['libs'],
                                               stack_index)
                     self.pre_ingest_row((stack,
-                                         other_samples['runnable'],
+                                         other['stringArray'][other_samples['runnable'][i]],
                                          other['name'],
                                          build_date,
                                          other_samples['userInteracting'][i],
-                                         other_samples['platform'][i],
+                                         other['stringArray'][other_samples['platform'][i]],
                                          date['sampleHangMs'][i],
                                          date['sampleHangCount'][i]))
 
@@ -312,11 +312,11 @@ class ProfileProcessor(object):
                                               other['libs'],
                                               stack_index)
                     self.ingest_row((stack,
-                                     other_samples['runnable'][i],
+                                     other['stringArray'][other_samples['runnable'][i]],
                                      other['name'],
                                      build_date,
                                      other_samples['userInteracting'][i],
-                                     other_samples['platform'][i],
+                                     other['stringArray'][other_samples['platform'][i]],
                                      date['sampleHangMs'][i],
                                      date['sampleHangCount'][i]))
         self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, profile.get('usageHoursByDate', {}))
