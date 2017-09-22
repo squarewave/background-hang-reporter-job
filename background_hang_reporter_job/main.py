@@ -90,6 +90,8 @@ def process_hangs(ping):
 
     modules = ping['payload/modules']
     hangs = ping['payload/hangs']
+    if hangs is None:
+        return []
 
     return [(
         [process_frame(frame, modules) for frame in h['stack']],
