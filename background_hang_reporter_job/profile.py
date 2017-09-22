@@ -364,9 +364,6 @@ class ProfileProcessor(object):
                 last_lib_name = lib_name
                 last_stack = stack_table.key_to_index(('(other)', lib_name, last_stack))
                 last_cache_item_index = cache_item_index
-                self.debugDump("Stripping stack {} - {} / {}".format(func_name,
-                                                                     cache_item[0],
-                                                                     root_stack[0]))
                 break
 
         sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))
