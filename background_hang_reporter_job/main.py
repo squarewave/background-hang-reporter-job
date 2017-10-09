@@ -252,11 +252,17 @@ def get_file_URL(module, config):
     else:
         file_name = lib_name + ".sym"
 
-    return config['symbol_server_url'] + "/".join([
-        urllib.quote_plus(lib_name),
-        urllib.quote_plus(breakpad_id),
-        urllib.quote_plus(file_name)
-    ])
+    try:
+        return config['symbol_server_url'] + "/".join([
+            urllib.quote_plus(lib_name),
+            urllib.quote_plus(breakpad_id),
+            urllib.quote_plus(file_name)
+        ])
+    except KeyError:
+        # urllib throws with unicode strings. TODO: investigate why
+        # any of these values (lib_name, breakpad_id, file_name) would
+        # have unicode strings, or if this is just bad pings.
+        return None
 
 def process_module(module, offsets, config):
     result = []
