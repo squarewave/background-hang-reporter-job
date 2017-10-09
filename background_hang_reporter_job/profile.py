@@ -398,8 +398,19 @@ class ProfileProcessor(object):
 
     def process_into_profile(self):
         print "Processing into final format..."
-        return {
-            'threads': [process_thread(t) for t in self.thread_table.get_items()],
-            'usageHoursByDate': self.usage_hours_by_date,
-            'uuid': self.config['uuid'],
-        }
+        if self.config['split_threads_in_out_file']:
+            return [
+                {
+                    'name': t['name'],
+                    'threads': [process_thread(t)],
+                    'usageHoursByDate': self.usage_hours_by_date,
+                    'uuid': self.config['uuid'],
+                }
+                for t in self.thread_table.get_items()
+            ]
+        else:
+            return {
+                'threads': [process_thread(t) for t in self.thread_table.get_items()],
+                'usageHoursByDate': self.usage_hours_by_date,
+                'uuid': self.config['uuid'],
+            }
