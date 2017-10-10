@@ -225,37 +225,6 @@ def sample_categorizer(categories, stack_table, func_table, string_array):
 
     return compute_category
 
-def process_thread(thread):
-    string_array = thread['stringArray']
-    func_table = thread['funcTable'].struct_of_arrays()
-    stack_table = thread['stackTable'].struct_of_arrays()
-    categorizer_p1 = sample_categorizer(categories_p1, stack_table, func_table, string_array)
-    categorizer_p2 = sample_categorizer(categories_p2, stack_table, func_table, string_array)
-
-    sample_table = thread['sampleTable'].struct_of_arrays()
-    sample_table['category'] = []
-    for s in sample_table['stack']:
-        category_string = categorizer_p1(s)
-        if category_string is None:
-            category_string = categorizer_p2(s)
-            if category_string is None:
-                sample_table['category'].append(None)
-            else:
-                sample_table['category'].append(string_array.key_to_index(category_string))
-        else:
-            sample_table['category'].append(string_array.key_to_index(category_string))
-
-    return {
-        'name': thread['name'],
-        'processType': thread['processType'],
-        'libs': thread['libs'].get_items(),
-        'funcTable': func_table,
-        'stackTable': stack_table,
-        'sampleTable': sample_table,
-        'stringArray': string_array.get_items(),
-        'dates': thread['dates'].get_items(),
-    }
-
 def reconstruct_stack(string_array, func_table, stack_table, lib_table, stack_index):
     result = []
     while stack_index != 0:
@@ -382,12 +351,12 @@ class ProfileProcessor(object):
         sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))
 
         date = dates.key_to_item(build_date)
-        if date['sampleHangMs'][sample_index] is None:
+        if date['sampleHangCount'][sample_index] is None:
+            date['sampleHangCount'][sample_index] = 0.0
             date['sampleHangMs'][sample_index] = 0.0
-            date['sampleHangCount'][sample_index] = 0
 
-        date['sampleHangMs'][sample_index] += hang_ms
         date['sampleHangCount'][sample_index] += hang_count
+        date['sampleHangMs'][sample_index] += hang_ms
 
     def ingest(self, data, usage_hours_by_date):
         print "{} unfiltered samples in data".format(len(data))
@@ -409,13 +378,52 @@ class ProfileProcessor(object):
 
         self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, usage_hours_by_date)
 
+    def process_date(self, date):
+        if self.config['use_minimal_sample_table']:
+            return {
+                'date': date['date'],
+                'sampleHangCount': date['sampleHangCount'],
+            }
+        return date
+
+    def process_thread(self, thread):
+        string_array = thread['stringArray']
+        func_table = thread['funcTable'].struct_of_arrays()
+        stack_table = thread['stackTable'].struct_of_arrays()
+        categorizer_p1 = sample_categorizer(categories_p1, stack_table, func_table, string_array)
+        categorizer_p2 = sample_categorizer(categories_p2, stack_table, func_table, string_array)
+
+        sample_table = thread['sampleTable'].struct_of_arrays()
+        sample_table['category'] = []
+        for s in sample_table['stack']:
+            category_string = categorizer_p1(s)
+            if category_string is None:
+                category_string = categorizer_p2(s)
+                if category_string is None:
+                    sample_table['category'].append(None)
+                else:
+                    sample_table['category'].append(string_array.key_to_index(category_string))
+            else:
+                sample_table['category'].append(string_array.key_to_index(category_string))
+
+        return {
+            'name': thread['name'],
+            'processType': thread['processType'],
+            'libs': thread['libs'].get_items(),
+            'funcTable': func_table,
+            'stackTable': stack_table,
+            'sampleTable': sample_table,
+            'stringArray': string_array.get_items(),
+            'dates': [self.process_date(d) for d in thread['dates'].get_items()],
+        }
+
     def process_into_profile(self):
         print "Processing into final format..."
         if self.config['split_threads_in_out_file']:
             return [
                 {
                     'name': t['name'],
-                    'threads': [process_thread(t)],
+                    'threads': [self.process_thread(t)],
                     'usageHoursByDate': self.usage_hours_by_date,
                     'uuid': self.config['uuid'],
                 }
@@ -423,7 +431,7 @@ class ProfileProcessor(object):
             ]
 
         return {
-            'threads': [process_thread(t) for t in self.thread_table.get_items()],
+            'threads': [self.process_thread(t) for t in self.thread_table.get_items()],
             'usageHoursByDate': self.usage_hours_by_date,
             'uuid': self.config['uuid'],
         }
