@@ -139,7 +139,7 @@ def get_default_lib(name):
         'arch': "",
     })
 
-def get_default_thread(name):
+def get_default_thread(name, minimal_sample_table):
     strings_table = UniqueKeyedTable(lambda str: str)
     libs = UniqueKeyedTable(get_default_lib)
     func_table = UniqueKeyedTable(lambda key: (
@@ -150,12 +150,20 @@ def get_default_thread(name):
         key[2],
         func_table.key_to_index((key[0], key[1]))
     ), ('prefix', 'func'))
-    sample_table = UniqueKeyedTable(lambda key: (
-        key[0],
-        strings_table.key_to_index(key[1]),
-        key[2],
-        strings_table.key_to_index(key[3]),
-    ), ('stack', 'runnable', 'userInteracting', 'platform'))
+    if minimal_sample_table:
+        sample_table = UniqueKeyedTable(lambda key: (
+            key[0],
+            strings_table.key_to_index(key[1]),
+            key[2],
+            strings_table.key_to_index(key[3]),
+        ), ('stack', 'platform'))
+    else:
+        sample_table = UniqueKeyedTable(lambda key: (
+            key[0],
+            strings_table.key_to_index(key[1]),
+            key[2],
+            strings_table.key_to_index(key[3]),
+        ), ('stack', 'runnable', 'userInteracting', 'platform'))
 
     stack_table.key_to_index(('(root)', None, None))
 
@@ -266,7 +274,9 @@ def merge_number_dicts(a, b):
 class ProfileProcessor(object):
     def __init__(self, config):
         self.config = config
-        self.thread_table = UniqueKeyedTable(get_default_thread)
+        def default_thread_closure(name):
+            return get_default_thread(name, config['use_minimal_sample_table'])
+        self.thread_table = UniqueKeyedTable(default_thread_closure)
         self.usage_hours_by_date = {}
 
     def debugDump(self, dump_str):
@@ -366,6 +376,9 @@ class ProfileProcessor(object):
                 last_cache_item_index = cache_item_index
                 break
 
+        if self.config['use_minimal_sample_table'] and thread_name == 'Gecko_Child' and not pending_input:
+            return
+
         sample_index = sample_table.key_to_index((last_stack, runnable_name, pending_input, platform))
 
         date = dates.key_to_item(build_date)
@@ -408,9 +421,9 @@ class ProfileProcessor(object):
                 }
                 for t in self.thread_table.get_items()
             ]
-        else:
-            return {
-                'threads': [process_thread(t) for t in self.thread_table.get_items()],
-                'usageHoursByDate': self.usage_hours_by_date,
-                'uuid': self.config['uuid'],
-            }
+
+        return {
+            'threads': [process_thread(t) for t in self.thread_table.get_items()],
+            'usageHoursByDate': self.usage_hours_by_date,
+            'uuid': self.config['uuid'],
+        }

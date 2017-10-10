@@ -433,6 +433,7 @@ default_config = {
     'analysis_output_url': 'https://analysis-output.telemetry.mozilla.org/',
     'read_files_from_network': False,
     'split_threads_in_out_file': False,
+    'use_minimal_sample_table': False,
     'TMP_use_crashes': False,
     'uuid': uuid.uuid4().hex,
 }
@@ -548,8 +549,8 @@ def etl_job_incremental_finalize(_, __, config=None):
             write_file(final_config['hang_profile_out_filename'] + '_' + thread['name'],
                        profile, final_config)
         write_file(final_config['hang_profile_out_filename'], {
-                    'threads': [t['name'] for t in profile],
-                    'isSplit': True,
-                   }, final_config)
+            'threads': [t['name'] for t in profile],
+            'isSplit': True,
+        }, final_config)
     else:
         write_file(final_config['hang_profile_out_filename'], profile, final_config)
