@@ -434,6 +434,7 @@ default_config = {
     'read_files_from_network': False,
     'split_threads_in_out_file': False,
     'use_minimal_sample_table': False,
+    'post_sample_size': 1.0,
     'TMP_use_crashes': False,
     'uuid': uuid.uuid4().hex,
 }

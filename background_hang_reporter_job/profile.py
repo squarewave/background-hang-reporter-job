@@ -1,5 +1,9 @@
+import random
 import re
 from sets import Set
+
+# For now we want like deterministic results, to aid debugging
+random.seed(0)
 
 def match_exact(symbol, pattern):
     return symbol == pattern
@@ -258,6 +262,7 @@ class ProfileProcessor(object):
             prune_stack_cache.key_to_index(('(root)', None, None))
             existing_thread['pruneStackCache'] = prune_stack_cache
 
+        sample_size = self.config['post_sample_size']
         threads = profile['threads']
         for other in threads:
             other_samples = other['sampleTable']
@@ -290,14 +295,16 @@ class ProfileProcessor(object):
                                               other['stackTable'],
                                               other['libs'],
                                               stack_index)
-                    self.ingest_row((stack,
-                                     other['stringArray'][other_samples['runnable'][i]],
-                                     other['name'],
-                                     build_date,
-                                     other_samples['userInteracting'][i],
-                                     other['stringArray'][other_samples['platform'][i]],
-                                     date['sampleHangMs'][i],
-                                     date['sampleHangCount'][i]))
+                    if sample_size == 1.0 or random.random() <= sample_size:
+                        self.ingest_row((stack,
+                                         other['stringArray'][other_samples['runnable'][i]],
+                                         other['name'],
+                                         build_date,
+                                         other_samples['userInteracting'][i],
+                                         other['stringArray'][other_samples['platform'][i]],
+                                         date['sampleHangMs'][i],
+                                         date['sampleHangCount'][i]))
+
         self.usage_hours_by_date = merge_number_dicts(self.usage_hours_by_date, profile.get('usageHoursByDate', {}))
 
     def pre_ingest_row(self, row):
