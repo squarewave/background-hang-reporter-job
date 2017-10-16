@@ -544,14 +544,12 @@ def etl_job_incremental_finalize(_, __, config=None):
         gc.collect()
         print_progress(job_start, iterations, x, iteration_start, date_str)
 
-    profile = profile_processor.process_into_profile()
     if final_config['split_threads_in_out_file']:
-        for thread in profile:
-            write_file(final_config['hang_profile_out_filename'] + '_' + thread['name'],
-                       thread, final_config)
-        write_file(final_config['hang_profile_out_filename'], {
-            'threads': [t['name'] for t in profile],
-            'isSplit': True,
-        }, final_config)
+        profile = profile_processor.process_into_split_profile()
+        for files in profile['file_data']:
+            for name, data in files:
+                write_file(final_config['hang_profile_out_filename'] + '_' + name, data, final_config)
+        write_file(final_config['hang_profile_out_filename'], profile['main_payload'], final_config)
     else:
+        profile = profile_processor.process_into_profile()
         write_file(final_config['hang_profile_out_filename'], profile, final_config)

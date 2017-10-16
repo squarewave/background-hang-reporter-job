@@ -424,6 +424,27 @@ class ProfileProcessor(object):
             'dates': [self.process_date(d) for d in thread['dates'].get_items()],
         }
 
+    def process_into_split_profile(self):
+        return {
+            'main_payload': {
+                'splitFiles': {
+                    t['name']: [k for k in t.keys() if k != 'name']
+                    for t in self.thread_table.get_items()
+                },
+                'usageHoursByDate': self.usage_hours_by_date,
+                'uuid': self.config['uuid'],
+                'isSplit': True,
+            },
+            'file_data': [
+                [
+                    (t['name'] + '_' + k, v)
+                    for k, v in self.process_thread(t).iteritems()
+                    if k != 'name'
+                ]
+                for t in self.thread_table.get_items()
+            ]
+        }
+
     def process_into_profile(self):
         print "Processing into final format..."
         if self.config['split_threads_in_out_file']:
