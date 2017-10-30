@@ -18,6 +18,7 @@ from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
 from background_hang_reporter_job.profile import ProfileProcessor
+from background_hang_reporter_job.tracked import get_tracked_stats
 import background_hang_reporter_job.crashes as crashes
 
 UNSYMBOLICATED = "<unsymbolicated>"
@@ -32,27 +33,39 @@ def time_code(name, callback):
     print "{} took {}ms to complete".format(name, int(round(delta * 1000)))
     return result
 
-def get_data(sc, config, date):
+def get_data(sc, config, date, end_date=None):
     if config['TMP_use_crashes']:
         return crashes.get_data(sc, config, date)
 
+    if end_date is None:
+        end_date = date
+
     date_str = date.strftime("%Y%m%d")
+    end_date_str = end_date.strftime("%Y%m%d")
 
     pings = (Dataset.from_source("telemetry")
              .where(docType='OTHER')
-             .where(appBuildId=lambda b: b.startswith(date_str))
+             .where(appBuildId=lambda b: b[:8] >= date_str and b[:8] <= end_date_str)
              .where(appUpdateChannel=config['channel'])
              .records(sc, sample=config['sample_size']))
 
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
 
-    properties = ["environment/system/os/name",
-                  "environment/system/os/version",
-                  "application/architecture",
-                  "application/buildId",
-                  "payload/modules",
-                  "payload/hangs",
-                  "payload/timeSinceLastPing"]
+    if config['exclude_modules']:
+        properties = ["environment/system/os/name",
+                      "environment/system/os/version",
+                      "application/architecture",
+                      "application/buildId",
+                      "payload/hangs",
+                      "payload/timeSinceLastPing"]
+    else:
+        properties = ["environment/system/os/name",
+                      "environment/system/os/version",
+                      "application/architecture",
+                      "application/buildId",
+                      "payload/modules",
+                      "payload/hangs",
+                      "payload/timeSinceLastPing"]
 
     try:
         return get_pings_properties(pings, properties, with_processes=True)
@@ -88,7 +101,7 @@ def process_hangs(ping):
                                  os_version,
                                  ping["application/architecture"])
 
-    modules = ping['payload/modules']
+    modules = ping.get('payload/modules', [])
     hangs = ping['payload/hangs']
     if hangs is None:
         return []
@@ -296,8 +309,50 @@ def process_modules(sc, frames_by_module, config):
     data = sc.parallelize(frames_by_module.iteritems())
     return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
 
+def map_to_histogram(hang):
+    #pylint: disable=unused-variable
+    stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
+    hist = [0] * 8
+    if duration < 128:
+        return (build_date, hist)
+    bucket = min(7, int(duration).bit_length() - 8) # 128 will give a bit length of 8
+    hist[bucket] = 1
+    return ((build_date, thread), hist)
+
+def reduce_histograms(a, b):
+    return [a_bucket + b_bucket for a_bucket, b_bucket in zip(a, b)]
+
+def count_hangs_in_pings(_, pings, tracked):
+    filtered = time_code("Filtering to valid pings",
+                         lambda: pings.filter(ping_is_valid))
+
+    hangs = time_code("Filtering to hangs with native stacks",
+                      lambda: get_all_hangs(filtered))
+
+    usage_hours_by_date = time_code("Getting usage hours",
+                                    lambda: get_usage_hours_by_date(filtered))
+
+    histograms_by_type = []
+    for tracked_stat in tracked:
+        filtered = hangs.filter(tracked_stat.matches_hang)
+        histograms_by_date_and_thread = (filtered.map(map_to_histogram)
+                                         .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
+                                         .collectAsMap())
+
+        histograms_by_thread = {}
+        for k, histogram in histograms_by_date_and_thread.iteritems():
+            build_date, thread = k
+            usage_hours = usage_hours_by_date[build_date]
+            if thread not in histograms_by_thread:
+                histograms_by_thread[thread] = {}
+            histograms_by_thread[thread][build_date] = [float(bucket) / usage_hours for bucket in histogram]
+
+        histograms_by_type.append((tracked_stat.title, histograms_by_thread))
+
+    return histograms_by_type
+
 def transform_pings(sc, pings, config):
-    filtered = time_code("Filtering to Windows pings",
+    filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
 
     hangs = time_code("Filtering to hangs with native stacks",
@@ -436,6 +491,7 @@ default_config = {
     'use_minimal_sample_table': False,
     'post_sample_size': 1.0,
     'TMP_use_crashes': False,
+    'exclude_modules': False,
     'uuid': uuid.uuid4().hex,
 }
 
@@ -487,6 +543,21 @@ def etl_job(sc, _, config=None):
 
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_out_filename'], profile, final_config)
+
+def etl_job_tracked_stats(sc, _, config=None):
+    final_config = {}
+    final_config.update(default_config)
+    if config is not None:
+        final_config.update(config)
+
+    if final_config['hang_profile_out_filename'] is None:
+        final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
+
+    data = time_code("Getting data",
+                     lambda: get_data(sc, final_config,
+                                      final_config['start_date'], final_config['end_date']))
+    histograms = count_hangs_in_pings(sc, data, get_tracked_stats())
+    write_file(final_config['hang_profile_out_filename'], histograms, final_config)
 
 def etl_job_incremental_write(sc, _, config=None):
     final_config = {}

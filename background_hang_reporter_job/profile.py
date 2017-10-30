@@ -183,7 +183,6 @@ def get_default_thread(name, minimal_sample_table):
         'sampleTable': sample_table,
         'stringArray': strings_table,
         'processType': 'tab' if name == 'Gecko_Child' or name == 'Gecko_Child_ForcePaint' else 'default',
-        'time': 0.0,
         'dates': UniqueKeyedTable(lambda date: ({
             'date': date,
             'sampleHangMs': GrowToFitList(),
