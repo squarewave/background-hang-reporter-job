@@ -43,8 +43,9 @@ def get_data(sc, config, date, end_date=None):
     date_str = date.strftime("%Y%m%d")
     end_date_str = end_date.strftime("%Y%m%d")
 
+    doc_type = 'OTHER' if date_str <= '20180315' else 'bhr'
     pings = (Dataset.from_source("telemetry")
-             .where(docType='OTHER')
+             .where(docType=doc_type)
              .where(appBuildId=lambda b: b[:8] >= date_str and b[:8] <= end_date_str)
              .where(appUpdateChannel=config['channel'])
              .records(sc, sample=config['sample_size']))
