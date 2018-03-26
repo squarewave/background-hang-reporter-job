@@ -50,6 +50,13 @@ def get_data(sc, config, date, end_date=None):
              .where(appUpdateChannel=config['channel'])
              .records(sc, sample=config['sample_size']))
 
+    if date_str <= '20180315' and end_date_str >= '20180316':
+        pings = pings.union(Dataset.from_source("telemetry")
+                            .where(docType='bhr')
+                            .where(appBuildId=lambda b: b[:8] >= date_str and b[:8] <= end_date_str)
+                            .where(appUpdateChannel=config['channel'])
+                            .records(sc, sample=config['sample_size']))
+
     pings = pings.filter(lambda p: p.get('meta', {}).get('docType', {}) == 'bhr')
 
     if config['exclude_modules']:
