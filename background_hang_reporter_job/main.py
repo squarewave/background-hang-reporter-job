@@ -19,6 +19,7 @@ from moztelemetry.dataset import Dataset
 
 from background_hang_reporter_job.profile import ProfileProcessor
 from background_hang_reporter_job.tracked import get_tracked_stats
+from background_hang_reporter_job.categories import categorize_stack
 import background_hang_reporter_job.crashes as crashes
 
 UNSYMBOLICATED = "<unsymbolicated>"
@@ -193,17 +194,10 @@ def merge_hang_data(a, b):
     )
 
 def process_hang_key(key, processed_modules):
-    stack, runnable_name, thread, build_date, pending_input, platform = key
+    stack = key[0]
     symbolicated = symbolicate_stacks(stack, processed_modules)
 
-    return (
-        tuple(symbolicated),
-        runnable_name,
-        thread,
-        build_date,
-        pending_input,
-        platform,
-    )
+    return (symbolicated,) + key[1:]
 
 def process_hang_value(key, val, usage_hours_by_date):
     #pylint: disable=unused-variable
@@ -320,22 +314,34 @@ def process_modules(sc, frames_by_module, config):
 def map_to_histogram(hang):
     #pylint: disable=unused-variable
     stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
+    category = categorize_stack(stack)
     hist = [0] * 8
     if duration < 128:
         return (build_date, hist)
     bucket = min(7, int(duration).bit_length() - 8) # 128 will give a bit length of 8
     hist[bucket] = 1
-    return ((build_date, thread), hist)
+    return ((build_date, thread, category), hist)
 
 def reduce_histograms(a, b):
     return [a_bucket + b_bucket for a_bucket, b_bucket in zip(a, b)]
 
-def count_hangs_in_pings(_, pings, tracked):
+def count_hangs_in_pings(sc, pings, tracked, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
 
     hangs = time_code("Filtering to hangs with native stacks",
                       lambda: get_all_hangs(filtered))
+
+    frames_by_module = time_code("Getting stacks by module",
+                                 lambda: get_frames_by_module(hangs))
+
+    processed_modules = time_code("Processing modules",
+                                  lambda: process_modules(sc, frames_by_module, config))
+
+    hangs = sc.parallelize([
+        process_hang_key(hang, processed_modules)
+        for hang in hangs.collect()
+    ])
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
@@ -343,17 +349,19 @@ def count_hangs_in_pings(_, pings, tracked):
     histograms_by_type = []
     for tracked_stat in tracked:
         filtered = hangs.filter(tracked_stat.matches_hang)
-        histograms_by_date_and_thread = (filtered.map(map_to_histogram)
-                                         .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
-                                         .collectAsMap())
+        histograms_by_date_thread_category = (filtered.map(map_to_histogram)
+                                              .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
+                                              .collectAsMap())
 
         histograms_by_thread = {}
-        for k, histogram in histograms_by_date_and_thread.iteritems():
-            build_date, thread = k
+        for k, histogram in histograms_by_date_thread_category.iteritems():
+            build_date, thread, category = k
             usage_hours = usage_hours_by_date[build_date]
             if thread not in histograms_by_thread:
                 histograms_by_thread[thread] = {}
-            histograms_by_thread[thread][build_date] = [float(bucket) / usage_hours for bucket in histogram]
+            if category not in histograms_by_thread[thread]:
+                histograms_by_thread[thread][category] = {}
+            histograms_by_thread[thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
 
         histograms_by_type.append((tracked_stat.title, histograms_by_thread))
 
@@ -564,7 +572,7 @@ def etl_job_tracked_stats(sc, _, config=None):
     data = time_code("Getting data",
                      lambda: get_data(sc, final_config,
                                       final_config['start_date'], final_config['end_date']))
-    histograms = count_hangs_in_pings(sc, data, get_tracked_stats())
+    histograms = count_hangs_in_pings(sc, data, get_tracked_stats(), final_config)
     write_file(final_config['hang_profile_out_filename'], histograms, final_config)
 
 def etl_job_incremental_write(sc, _, config=None):
