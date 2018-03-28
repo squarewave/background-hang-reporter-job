@@ -343,10 +343,7 @@ def count_hangs_in_pings(sc, pings, tracked, config):
     processed_modules = time_code("Processing modules",
                                   lambda: process_modules(sc, frames_by_module, config))
 
-    hangs = sc.parallelize([
-        process_hang_key(hang, processed_modules)
-        for hang in hangs.collect()
-    ])
+    hangs = hangs.map(lambda hang: process_hang_key(hang, processed_modules))
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
