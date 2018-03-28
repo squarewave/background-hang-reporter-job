@@ -71,4 +71,7 @@ def categorize_stack(stack):
     category_p1 = categorize_stack_with(stack, categories_p1)
     if category_p1 is not None:
         return category_p1
-    return categorize_stack_with(stack, categories_p2)
+    category_p2 = categorize_stack_with(stack, categories_p2)
+    if category_p2 is not None:
+        return category_p2
+    return "uncategorized"

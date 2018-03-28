@@ -314,7 +314,7 @@ def process_modules(sc, frames_by_module, config):
 def map_to_histogram(hang):
     #pylint: disable=unused-variable
     stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
-    category = categorize_stack(stack)
+    category = categorize_stack(stack).split(".")[0]
     hist = [0] * 8
     if duration < 128:
         return (build_date, hist)
@@ -324,6 +324,11 @@ def map_to_histogram(hang):
 
 def reduce_histograms(a, b):
     return [a_bucket + b_bucket for a_bucket, b_bucket in zip(a, b)]
+
+def get_histograms_by_date_thread_category(filtered):
+    return (filtered.map(map_to_histogram)
+            .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
+            .collectAsMap())
 
 def count_hangs_in_pings(sc, pings, tracked, config):
     filtered = time_code("Filtering to valid pings",
@@ -349,9 +354,8 @@ def count_hangs_in_pings(sc, pings, tracked, config):
     histograms_by_type = []
     for tracked_stat in tracked:
         filtered = hangs.filter(tracked_stat.matches_hang)
-        histograms_by_date_thread_category = (filtered.map(map_to_histogram)
-                                              .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
-                                              .collectAsMap())
+        histograms_by_date_thread_category = time_code("Getting histograms for " + tracked_stat.title,
+                                                       lambda: get_histograms_by_date_thread_category(filtered))
 
         histograms_by_thread = {}
         for k, histogram in histograms_by_date_thread_category.iteritems():
