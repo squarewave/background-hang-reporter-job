@@ -16,7 +16,7 @@ class DevtoolsHangs(object):
                                          for frame, lib in stack)
 
 class ActivityStreamHangs(object):
-    title = "Devtools Hangs"
+    title = "Activity Stream Hangs"
 
     @staticmethod
     def matches_hang(hang):
