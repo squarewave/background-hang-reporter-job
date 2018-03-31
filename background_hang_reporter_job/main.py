@@ -25,6 +25,15 @@ import background_hang_reporter_job.crashes as crashes
 UNSYMBOLICATED = "<unsymbolicated>"
 REDUCE_BY_KEY_PARALLELISM = 4001
 
+def deep_merge(original, overrides):
+    original_copy = original.copy()
+    for k, v in overrides.iteritems():
+        if isinstance(v, dict) and k in original_copy and isinstance(original_copy[k], dict):
+            original_copy[k] = deep_merge(original_copy[k], v)
+        else:
+            original_copy[k] = v
+    return original_copy
+
 def time_code(name, callback):
     print "{}...".format(name)
     start = time.time()
@@ -574,6 +583,15 @@ def etl_job_tracked_stats(sc, _, config=None):
                      lambda: get_data(sc, final_config,
                                       final_config['start_date'], final_config['end_date']))
     histograms = count_hangs_in_pings(sc, data, get_tracked_stats(), final_config)
+    existing = read_file(final_config['hang_profile_out_filename'], final_config)
+    existing_dict = {k: v for k, v in existing}
+    for i, (title, data) in enumerate(histograms):
+        if title in existing_dict:
+            histograms[i] = (title, deep_merge(existing_dict[title], data))
+            del existing_dict[title]
+    for entry in existing_dict.iteritems():
+        histograms.append(entry)
+
     write_file(final_config['hang_profile_out_filename'], histograms, final_config)
 
 def etl_job_incremental_write(sc, _, config=None):

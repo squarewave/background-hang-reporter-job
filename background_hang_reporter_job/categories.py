@@ -58,6 +58,9 @@ categories_p2 = [
 
     # Can't do this until we come up with a way of labeling ion/baseline.
     (match_prefix, 'Interpret(', 'script.execute.interpreter'),
+
+    (match_prefix, 'mozilla::gfx', 'gfx'),
+    (match_prefix, 'D2DDevice', 'os_gfx'),
 ]
 
 def categorize_stack_with(stack, categories):
