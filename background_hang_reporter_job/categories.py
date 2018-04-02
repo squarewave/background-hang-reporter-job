@@ -61,6 +61,8 @@ categories_p2 = [
 
     (match_prefix, 'mozilla::gfx', 'gfx'),
     (match_prefix, 'D2DDevice', 'os_gfx'),
+
+    (match_prefix, 'mozJSComponentLoader::', 'js_component_load'),
 ]
 
 def categorize_stack_with(stack, categories):
