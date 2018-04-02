@@ -63,6 +63,8 @@ categories_p2 = [
     (match_prefix, 'D2DDevice', 'os_gfx'),
 
     (match_prefix, 'mozJSComponentLoader::', 'js_component_load'),
+
+    (match_exact, 'nsBaseFilePicker::AsyncShowFilePicker::Run()', 'filepicker'),
 ]
 
 def categorize_stack_with(stack, categories):
