@@ -25,7 +25,8 @@ class PlacesHangs(object):
     def matches_hang(hang):
         #pylint: disable=unused-variable
         stack, duration, thread, runnable, process, annotations, build_date, platform = hang
-        return stack is not None and any(isinstance(frame, basestring) and "/places/" in frame
+        return stack is not None and any(isinstance(frame, basestring) and
+                                         ("/places/" in frame or "/modules/Places" in frame)
                                          for frame, lib in stack)
 
 class TelemetryHangs(object):
