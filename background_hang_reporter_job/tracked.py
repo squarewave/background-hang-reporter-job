@@ -28,6 +28,17 @@ class PlacesHangs(object):
         return stack is not None and any(isinstance(frame, basestring) and "/places/" in frame
                                          for frame, lib in stack)
 
+class TelemetryHangs(object):
+    title = "Telemetry Hangs"
+
+    @staticmethod
+    def matches_hang(hang):
+        #pylint: disable=unused-variable
+        stack, duration, thread, runnable, process, annotations, build_date, platform = hang
+        return stack is not None and any(isinstance(frame, basestring) and
+                                         ("/telemetry/" in frame or "/modules/Telemetry" in frame)
+                                         for frame, lib in stack)
+
 def get_tracked_stats():
     return [DevtoolsHangs, ActivityStreamHangs, PlacesHangs]
 
