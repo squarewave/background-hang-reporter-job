@@ -372,7 +372,10 @@ def count_hangs_in_pings(sc, pings, config):
                 histograms_by_component[component][thread] = {}
             if category not in histograms_by_component[component][thread]:
                 histograms_by_component[component][thread][category] = {}
-            histograms_by_component[component][thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
+            if build_date not in histograms_by_component[component][thread][category]:
+                histograms_by_component[component][thread][category][build_date] = [0 for bucket in histogram]
+            for i, bucket in enumerate(histogram):
+                histograms_by_component[component][thread][category][build_date][i] += float(bucket) / usage_hours
 
     return [(title, data) for title, data in histograms_by_component.iteritems()]
 
@@ -575,14 +578,16 @@ def etl_job_tracked_stats(sc, _, config=None):
     if config is not None:
         final_config.update(config)
 
-    if final_config['hang_profile_out_filename'] is None:
+    if final_config['hang_profile_in_filename'] is None:
+        final_config['hang_profile_in_filename'] = final_config['hang_profile_out_filename']
+    elif final_config['hang_profile_out_filename'] is None:
         final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
 
     data = time_code("Getting data",
                      lambda: get_data(sc, final_config,
                                       final_config['start_date'], final_config['end_date']))
     histograms = count_hangs_in_pings(sc, data, final_config)
-    existing = read_file(final_config['hang_profile_out_filename'], final_config)
+    existing = read_file(final_config['hang_profile_in_filename'], final_config)
     existing_dict = {k: v for k, v in existing}
     for i, (title, data) in enumerate(histograms):
         if title in existing_dict:
