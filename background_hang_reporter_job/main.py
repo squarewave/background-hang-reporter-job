@@ -359,7 +359,7 @@ def count_hangs_in_pings(sc, pings, config):
                                     lambda: get_usage_hours_by_date(filtered))
 
     histograms = time_code("Getting histograms",
-                           lambda: get_histograms_by_date_thread_category(filtered))
+                           lambda: get_histograms_by_date_thread_category(hangs))
 
     histograms_by_type = []
     all_hangs_histograms_by_thread = {}
