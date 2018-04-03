@@ -349,10 +349,9 @@ def count_hangs_in_pings(sc, pings, config):
 
     frames_by_module = time_code("Getting stacks by module",
                                  lambda: get_frames_by_module(hangs))
-    print frames_by_module
+
     processed_modules = time_code("Processing modules",
                                   lambda: process_modules(sc, frames_by_module, config))
-    print processed_modules
 
     hangs = hangs.map(lambda hang: process_hang_key(hang, processed_modules))
 
