@@ -18,7 +18,7 @@ from moztelemetry import get_pings_properties
 from moztelemetry.dataset import Dataset
 
 from background_hang_reporter_job.profile import ProfileProcessor
-from background_hang_reporter_job.tracked import get_tracked_stats
+from background_hang_reporter_job.tracked import get_tracking_component
 from background_hang_reporter_job.categories import categorize_stack
 import background_hang_reporter_job.crashes as crashes
 
@@ -324,12 +324,13 @@ def map_to_histogram(hang):
     #pylint: disable=unused-variable
     stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
     category = categorize_stack(stack).split(".")[0]
+    component = get_tracking_component(hang)
     hist = [0] * 8
     if duration < 128:
         return (build_date, hist)
     bucket = min(7, int(duration).bit_length() - 8) # 128 will give a bit length of 8
     hist[bucket] = 1
-    return ((build_date, thread, category), hist)
+    return ((component, thread, category, build_date), hist)
 
 def reduce_histograms(a, b):
     return [a_bucket + b_bucket for a_bucket, b_bucket in zip(a, b)]
@@ -339,7 +340,7 @@ def get_histograms_by_date_thread_category(filtered):
             .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
             .collectAsMap())
 
-def count_hangs_in_pings(sc, pings, tracked, config):
+def count_hangs_in_pings(sc, pings, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
 
@@ -357,23 +358,25 @@ def count_hangs_in_pings(sc, pings, tracked, config):
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
 
-    histograms_by_type = []
-    for tracked_stat in tracked:
-        filtered = hangs.filter(tracked_stat.matches_hang)
-        histograms_by_date_thread_category = time_code("Getting histograms for " + tracked_stat.title,
-                                                       lambda: get_histograms_by_date_thread_category(filtered))
+    histograms = time_code("Getting histograms",
+                           lambda: get_histograms_by_date_thread_category(filtered))
 
+    histograms_by_type = []
+    all_hangs_histograms_by_thread = {}
+    histograms_by_type.append(("All Hangs", all_hangs_histograms_by_thread))
+    for title, data in histograms.iteritems():
         histograms_by_thread = {}
-        for k, histogram in histograms_by_date_thread_category.iteritems():
+        for k, histogram in data.iteritems():
             build_date, thread, category = k
             usage_hours = usage_hours_by_date[build_date]
-            if thread not in histograms_by_thread:
-                histograms_by_thread[thread] = {}
-            if category not in histograms_by_thread[thread]:
-                histograms_by_thread[thread][category] = {}
-            histograms_by_thread[thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
+            for component in [all_hangs_histograms_by_thread, histograms_by_thread]:
+                if thread not in component:
+                    component[thread] = {}
+                if category not in component[thread]:
+                    component[thread][category] = {}
+                component[thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
 
-        histograms_by_type.append((tracked_stat.title, histograms_by_thread))
+        histograms_by_type.append((title, histograms_by_thread))
 
     return histograms_by_type
 
@@ -582,7 +585,7 @@ def etl_job_tracked_stats(sc, _, config=None):
     data = time_code("Getting data",
                      lambda: get_data(sc, final_config,
                                       final_config['start_date'], final_config['end_date']))
-    histograms = count_hangs_in_pings(sc, data, get_tracked_stats(), final_config)
+    histograms = count_hangs_in_pings(sc, data, final_config)
     existing = read_file(final_config['hang_profile_out_filename'], final_config)
     existing_dict = {k: v for k, v in existing}
     for i, (title, data) in enumerate(histograms):

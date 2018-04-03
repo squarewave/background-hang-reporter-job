@@ -1,10 +1,3 @@
-class AllHangs(object):
-    title = "All Hangs"
-
-    @staticmethod
-    def matches_hang(_):
-        return True
-
 class DevtoolsHangs(object):
     title = "Devtools Hangs"
 
@@ -25,5 +18,20 @@ class ActivityStreamHangs(object):
         return stack is not None and any(isinstance(frame, basestring) and "activity-stream/" in frame
                                          for frame, lib in stack)
 
+class PlacesHangs(object):
+    title = "Places Hangs"
+
+    @staticmethod
+    def matches_hang(hang):
+        #pylint: disable=unused-variable
+        stack, duration, thread, runnable, process, annotations, build_date, platform = hang
+        return stack is not None and any(isinstance(frame, basestring) and "/places/" in frame
+                                         for frame, lib in stack)
+
 def get_tracked_stats():
-    return [AllHangs, DevtoolsHangs, ActivityStreamHangs]
+    return [DevtoolsHangs, ActivityStreamHangs, PlacesHangs]
+
+def get_tracking_component(hang):
+    for stat in get_tracked_stats():
+        if stat.matches_hang(hang):
+            return stat.title
