@@ -361,24 +361,20 @@ def count_hangs_in_pings(sc, pings, config):
     histograms = time_code("Getting histograms",
                            lambda: get_histograms_by_date_thread_category(hangs))
 
-    histograms_by_type = []
-    all_hangs_histograms_by_thread = {}
-    histograms_by_type.append(("All Hangs", all_hangs_histograms_by_thread))
-    for title, data in histograms.iteritems():
-        histograms_by_thread = {}
-        for k, histogram in data.iteritems():
-            build_date, thread, category = k
-            usage_hours = usage_hours_by_date[build_date]
-            for component in [all_hangs_histograms_by_thread, histograms_by_thread]:
-                if thread not in component:
-                    component[thread] = {}
-                if category not in component[thread]:
-                    component[thread][category] = {}
-                component[thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
+    histograms_by_component = {}
+    for k, histogram in histograms.iteritems():
+        component_outer, thread, category, build_date = k
+        usage_hours = usage_hours_by_date[build_date]
+        for component in [component_outer, "All Hangs"]:
+            if component not in histograms_by_component:
+                histograms_by_component[component] = {}
+            if thread not in histograms_by_component[component]:
+                histograms_by_component[component][thread] = {}
+            if category not in histograms_by_component[component][thread]:
+                histograms_by_component[component][thread][category] = {}
+            histograms_by_component[component][thread][category][build_date] = [float(bucket) / usage_hours for bucket in histogram]
 
-        histograms_by_type.append((title, histograms_by_thread))
-
-    return histograms_by_type
+    return [(title, data) for title, data in histograms_by_component.iteritems()]
 
 def transform_pings(sc, pings, config):
     filtered = time_code("Filtering to valid pings",

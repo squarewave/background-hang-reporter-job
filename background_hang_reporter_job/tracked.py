@@ -47,3 +47,4 @@ def get_tracking_component(hang):
     for stat in get_tracked_stats():
         if stat.matches_hang(hang):
             return stat.title
+    return "unknown_component"
