@@ -41,7 +41,7 @@ class TelemetryHangs(object):
                                          for frame, lib in stack)
 
 def get_tracked_stats():
-    return [DevtoolsHangs, ActivityStreamHangs, PlacesHangs]
+    return [DevtoolsHangs, ActivityStreamHangs, PlacesHangs, TelemetryHangs]
 
 def get_tracking_component(hang):
     for stat in get_tracked_stats():
