@@ -66,7 +66,7 @@ categories_p2 = [
 
     (match_exact, 'nsBaseFilePicker::AsyncShowFilePicker::Run()', 'filepicker'),
 
-    (match_exact, 'nsBaseFilePicker::AsyncShowFilePicker::Run()', 'filepicker'),
+    (match_exact, 'mozilla::storage', 'storage'),
 ]
 
 def categorize_stack_with(stack, categories):
