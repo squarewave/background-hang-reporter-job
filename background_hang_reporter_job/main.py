@@ -23,7 +23,6 @@ from background_hang_reporter_job.categories import categorize_stack
 import background_hang_reporter_job.crashes as crashes
 
 UNSYMBOLICATED = "<unsymbolicated>"
-REDUCE_BY_KEY_PARALLELISM = 4001
 
 def deep_merge(original, overrides):
     original_copy = original.copy()
@@ -104,9 +103,11 @@ def ping_is_valid(ping):
 
 def process_frame(frame, modules):
     if isinstance(frame, list):
-        if frame[0] < 0 or frame[0] >= len(modules) or frame[0] is None:
-            return (None, frame[1])
-        return ((modules[frame[0]][0], modules[frame[0]][1]), frame[1])
+        module_index, offset = frame
+        if module_index < 0 or module_index >= len(modules) or module_index is None:
+            return (None, offset)
+        debug_name, breakpad_id = modules[module_index]
+        return ((debug_name, breakpad_id), offset)
     else:
         return (('pseudo', None), frame)
 
@@ -133,7 +134,7 @@ def process_hangs(ping):
         h['annotations'],
         build_date,
         platform,
-    ) for h in hangs]
+    ) for h in hangs if len(h['stack']) > 0]
 
 def get_all_hangs(pings):
     return pings.flatMap(process_hangs)
@@ -147,22 +148,21 @@ def map_to_frame_info(hang):
     ]
 
 def get_frames_by_module(hangs):
-    return (hangs.flatMap(lambda hang: hang[0])
-            .filter(lambda hang_tuple: hang_tuple[0] is not None)
-            .map(lambda hang_tuple: (hang_tuple[0], (hang_tuple[1],)))
+    return (hangs.flatMap(lambda hang: hang[0]) # turn into an RDD of frames
+            .map(lambda frame: (frame[0], (frame[1],)))
             .distinct()
-            .reduceByKey(lambda a, b: a + b, REDUCE_BY_KEY_PARALLELISM)
-            .collectAsMap())
+            .reduceByKey(lambda a, b: a + b))
 
 def symbolicate_stacks(stack, processed_modules):
+    symbol_map = {k: v for k, v in processed_modules}
     symbolicated = []
     for module, offset in stack:
         if module is not None:
-            debug_name, breakpad_id = module
-            processed = processed_modules.get((breakpad_id, offset), None)
+            processed = symbol_map.get((module, offset), None)
             if processed is not None:
                 symbolicated.append(processed)
             else:
+                debug_name = module[0]
                 symbolicated.append((UNSYMBOLICATED, debug_name))
         else:
             symbolicated.append((UNSYMBOLICATED, 'unknown'))
@@ -213,11 +213,33 @@ def process_hang_value(key, val, usage_hours_by_date):
     stack, runnable_name, thread, build_date, pending_input, platform = key
     return (val[0] / usage_hours_by_date[build_date], val[1] / usage_hours_by_date[build_date])
 
+def get_frames_with_hang_id(hang_tuple):
+    hang_id, hang = hang_tuple
+    stack = hang[0]
+    return [(frame, hang_id) for frame in stack]
+
+def get_symbolication_mapping_by_hang_id(joined):
+    unsymbolicated, (hang_id, symbolicated) = joined
+    return (hang_id, ((unsymbolicated, symbolicated),))
+
+def symbolicate_hang_with_mapping(joined):
+    hang, symbol_map = joined[1]
+    return process_hang_key(hang, symbol_map)
+
+def symbolicate_hang_keys(hangs, processed_modules):
+    hangs_by_id = hangs.zipWithUniqueId().map(lambda x: (x[1], x[0]))
+    hang_ids_by_frame = hangs_by_id.flatMap(get_frames_with_hang_id)
+    symbolication_maps_by_hang_id = (hang_ids_by_frame.leftOuterJoin(processed_modules)
+                                     .map(get_symbolication_mapping_by_hang_id)
+                                     .distinct()
+                                     .reduceByKey(lambda a, b: a + b))
+    return hangs_by_id.join(symbolication_maps_by_hang_id).map(symbolicate_hang_with_mapping)
+
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
     reduced = (hangs
                .map(lambda hang: map_to_hang_data(hang, config))
                .filter(lambda hang: hang is not None)
-               .reduceByKey(merge_hang_data, REDUCE_BY_KEY_PARALLELISM)
+               .reduceByKey(merge_hang_data)
                .collect())
     items = [
         (process_hang_key(k, processed_modules), process_hang_value(k, v, usage_hours_by_date))
@@ -237,7 +259,7 @@ def merge_usage_hours(a, b):
 
 def get_usage_hours_by_date(pings):
     return (pings.map(get_usage_hours)
-            .reduceByKey(merge_usage_hours, REDUCE_BY_KEY_PARALLELISM)
+            .reduceByKey(merge_usage_hours)
             .collectAsMap())
 
 def make_sym_map(data):
@@ -290,10 +312,12 @@ def get_file_URL(module, config):
 
 def process_module(module, offsets, config):
     result = []
+    if module is None or module[0] is None:
+        return [((module, offset), (UNSYMBOLICATED, 'unknown')) for offset in offsets]
     if module[0] == 'pseudo':
-        return [((None, offset), (offset, '')) for offset in offsets]
+        return [((module, offset), (offset, '')) for offset in offsets]
     file_URL = get_file_URL(module, config)
-    module_name, breakpad_id = module
+    module_name = module[0]
     if file_URL:
         success, response = fetch_URL(file_URL)
     else:
@@ -308,17 +332,16 @@ def process_module(module, offsets, config):
 
             symbol = sym_map.get(key)
             if symbol is not None:
-                result.append(((breakpad_id, offset), (symbol, module_name)))
+                result.append(((module, offset), (symbol, module_name)))
             else:
-                result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
+                result.append(((module, offset), (UNSYMBOLICATED, module_name)))
     else:
         for offset in offsets:
-            result.append(((breakpad_id, offset), (UNSYMBOLICATED, module_name)))
+            result.append(((module, offset), (UNSYMBOLICATED, module_name)))
     return result
 
-def process_modules(sc, frames_by_module, config):
-    data = sc.parallelize(frames_by_module.iteritems())
-    return data.flatMap(lambda x: process_module(x[0], x[1], config)).collectAsMap()
+def process_modules(frames_by_module, config):
+    return frames_by_module.flatMap(lambda x: process_module(x[0], x[1], config))
 
 def map_to_histogram(hang):
     #pylint: disable=unused-variable
@@ -337,10 +360,10 @@ def reduce_histograms(a, b):
 
 def get_histograms_by_date_thread_category(filtered):
     return (filtered.map(map_to_histogram)
-            .reduceByKey(reduce_histograms, REDUCE_BY_KEY_PARALLELISM)
+            .reduceByKey(reduce_histograms)
             .collectAsMap())
 
-def count_hangs_in_pings(sc, pings, config):
+def count_hangs_in_pings(_, pings, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
 
@@ -351,9 +374,9 @@ def count_hangs_in_pings(sc, pings, config):
                                  lambda: get_frames_by_module(hangs))
 
     processed_modules = time_code("Processing modules",
-                                  lambda: process_modules(sc, frames_by_module, config))
+                                  lambda: process_modules(frames_by_module, config))
 
-    hangs = hangs.map(lambda hang: process_hang_key(hang, processed_modules))
+    hangs = symbolicate_hang_keys(hangs, processed_modules)
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
@@ -379,7 +402,7 @@ def count_hangs_in_pings(sc, pings, config):
 
     return [(title, data) for title, data in histograms_by_component.iteritems()]
 
-def transform_pings(sc, pings, config):
+def transform_pings(_, pings, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
 
@@ -390,7 +413,7 @@ def transform_pings(sc, pings, config):
                                  lambda: get_frames_by_module(hangs))
 
     processed_modules = time_code("Processing modules",
-                                  lambda: process_modules(sc, frames_by_module, config))
+                                  lambda: process_modules(frames_by_module, config))
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
