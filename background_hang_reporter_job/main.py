@@ -381,6 +381,11 @@ def count_hangs_in_pings(_, pings, config):
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
 
+    count = (hangs.map(map_to_histogram)
+             .reduceByKey(reduce_histograms)
+             .count())
+    print "Got count: " + count
+
     histograms = time_code("Getting histograms",
                            lambda: get_histograms_by_date_thread_category(hangs))
 
