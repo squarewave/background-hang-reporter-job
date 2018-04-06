@@ -372,22 +372,25 @@ def count_hangs_in_pings(_, pings, config):
 
     frames_by_module = time_code("Getting stacks by module",
                                  lambda: get_frames_by_module(hangs))
+    print "RDD count: {}".format(frames_by_module.count())
 
     processed_modules = time_code("Processing modules",
                                   lambda: process_modules(frames_by_module, config))
+    print "RDD count: {}".format(processed_modules.count())
 
     hangs = symbolicate_hang_keys(hangs, processed_modules)
-
-    usage_hours_by_date = time_code("Getting usage hours",
-                                    lambda: get_usage_hours_by_date(filtered))
+    print "RDD count: {}".format(hangs.count())
 
     count = (hangs.map(map_to_histogram)
              .reduceByKey(reduce_histograms)
              .count())
-    print "Got count: " + count
+    print "RDD count: {}".format(count)
 
     histograms = time_code("Getting histograms",
                            lambda: get_histograms_by_date_thread_category(hangs))
+
+    usage_hours_by_date = time_code("Getting usage hours",
+                                    lambda: get_usage_hours_by_date(filtered))
 
     histograms_by_component = {}
     for k, histogram in histograms.iteritems():
