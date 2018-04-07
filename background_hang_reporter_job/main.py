@@ -231,7 +231,6 @@ def symbolicate_hang_keys(hangs, processed_modules):
     hang_ids_by_frame = hangs_by_id.flatMap(get_frames_with_hang_id)
     symbolication_maps_by_hang_id = (hang_ids_by_frame.leftOuterJoin(processed_modules)
                                      .map(get_symbolication_mapping_by_hang_id)
-                                     .distinct()
                                      .reduceByKey(lambda a, b: a + b))
     return hangs_by_id.join(symbolication_maps_by_hang_id).map(symbolicate_hang_with_mapping)
 
