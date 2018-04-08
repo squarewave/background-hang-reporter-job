@@ -33,6 +33,12 @@ def deep_merge(original, overrides):
             original_copy[k] = v
     return original_copy
 
+def shallow_merge(original, overrides):
+    original_copy = original.copy()
+    for k, v in overrides.iteritems():
+        original_copy[k] = v
+    return original_copy
+
 def time_code(name, callback):
     print "{}...".format(name)
     start = time.time()
@@ -154,11 +160,10 @@ def get_frames_by_module(hangs):
             .reduceByKey(lambda a, b: a + b))
 
 def symbolicate_stacks(stack, processed_modules):
-    symbol_map = {k: v for k, v in processed_modules}
     symbolicated = []
     for module, offset in stack:
         if module is not None:
-            processed = symbol_map.get((module, offset), None)
+            processed = processed_modules.get((module, offset), None)
             if processed is not None:
                 symbolicated.append(processed)
             else:
@@ -220,7 +225,7 @@ def get_frames_with_hang_id(hang_tuple):
 
 def get_symbolication_mapping_by_hang_id(joined):
     unsymbolicated, (hang_id, symbolicated) = joined
-    return (hang_id, ((unsymbolicated, symbolicated),))
+    return (hang_id, {unsymbolicated: symbolicated})
 
 def symbolicate_hang_with_mapping(joined):
     hang, symbol_map = joined[1]
@@ -231,7 +236,7 @@ def symbolicate_hang_keys(hangs, processed_modules):
     hang_ids_by_frame = hangs_by_id.flatMap(get_frames_with_hang_id)
     symbolication_maps_by_hang_id = (hang_ids_by_frame.leftOuterJoin(processed_modules)
                                      .map(get_symbolication_mapping_by_hang_id)
-                                     .reduceByKey(lambda a, b: a + b))
+                                     .reduceByKey(shallow_merge))
     return hangs_by_id.join(symbolication_maps_by_hang_id).map(symbolicate_hang_with_mapping)
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
