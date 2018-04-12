@@ -10,6 +10,10 @@ import uuid
 from bisect import bisect
 from datetime import datetime, timedelta
 from StringIO import StringIO
+#pylint: disable=import-error
+from pyspark.sql.types import Row
+#pylint: disable=import-error
+from pyspark.sql.functions import array, collect_list
 
 import ujson as json
 import boto3
@@ -33,11 +37,13 @@ def deep_merge(original, overrides):
             original_copy[k] = v
     return original_copy
 
+
 def shallow_merge(original, overrides):
     original_copy = original.copy()
     for k, v in overrides.iteritems():
         original_copy[k] = v
     return original_copy
+
 
 def time_code(name, callback):
     print "{}...".format(name)
@@ -47,6 +53,7 @@ def time_code(name, callback):
     delta = end - start
     print "{} took {}ms to complete".format(name, int(round(delta * 1000)))
     return result
+
 
 def get_data(sc, config, date, end_date=None):
     if config['TMP_use_crashes']:
@@ -95,6 +102,7 @@ def get_data(sc, config, date, end_date=None):
     except ValueError:
         return None
 
+
 def ping_is_valid(ping):
     if not isinstance(ping["environment/system/os/version"], basestring):
         return False
@@ -107,6 +115,22 @@ def ping_is_valid(ping):
 
     return True
 
+
+def module_to_string(module):
+    if module is None:
+        return None
+    return module[0] + '\\' + str(module[1])
+
+
+def string_to_module(string_module):
+    if string_module is None:
+        return None
+    split_module = string_module.split('\\')
+    if len(split_module) != 2:
+        raise Exception('Module strings had an extra \\')
+    return (split_module[0], None if split_module[1] == 'None' else split_module[1])
+
+
 def process_frame(frame, modules):
     if isinstance(frame, list):
         module_index, offset = frame
@@ -116,6 +140,7 @@ def process_frame(frame, modules):
         return ((debug_name, breakpad_id), offset)
     else:
         return (('pseudo', None), frame)
+
 
 def process_hangs(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
@@ -142,8 +167,10 @@ def process_hangs(ping):
         platform,
     ) for h in hangs if len(h['stack']) > 0]
 
+
 def get_all_hangs(pings):
     return pings.flatMap(process_hangs)
+
 
 def map_to_frame_info(hang):
     memory_map = hang['hang']['nativeStack']['memoryMap']
@@ -153,17 +180,20 @@ def map_to_frame_info(hang):
         for module_index, offset in stack
     ]
 
+
 def get_frames_by_module(hangs):
     return (hangs.flatMap(lambda hang: hang[0]) # turn into an RDD of frames
             .map(lambda frame: (frame[0], (frame[1],)))
             .distinct()
             .reduceByKey(lambda a, b: a + b))
 
+
 def symbolicate_stacks(stack, processed_modules):
+    symbol_map = {k: v for k, v in processed_modules}
     symbolicated = []
     for module, offset in stack:
         if module is not None:
-            processed = processed_modules.get((module, offset), None)
+            processed = symbol_map.get((module, offset), None)
             if processed is not None:
                 symbolicated.append(processed)
             else:
@@ -172,6 +202,7 @@ def symbolicate_stacks(stack, processed_modules):
         else:
             symbolicated.append((UNSYMBOLICATED, 'unknown'))
     return symbolicated
+
 
 def map_to_hang_data(hang, config):
     #pylint: disable=unused-variable
@@ -201,11 +232,13 @@ def map_to_hang_data(hang, config):
         1.0,
     ))
 
+
 def merge_hang_data(a, b):
     return (
         a[0] + b[0],
         a[1] + b[1],
     )
+
 
 def process_hang_key(key, processed_modules):
     stack = key[0]
@@ -213,31 +246,70 @@ def process_hang_key(key, processed_modules):
 
     return (symbolicated,) + key[1:]
 
+
 def process_hang_value(key, val, usage_hours_by_date):
     #pylint: disable=unused-variable
     stack, runnable_name, thread, build_date, pending_input, platform = key
     return (val[0] / usage_hours_by_date[build_date], val[1] / usage_hours_by_date[build_date])
+
 
 def get_frames_with_hang_id(hang_tuple):
     hang_id, hang = hang_tuple
     stack = hang[0]
     return [(frame, hang_id) for frame in stack]
 
+
 def get_symbolication_mapping_by_hang_id(joined):
     unsymbolicated, (hang_id, symbolicated) = joined
     return (hang_id, {unsymbolicated: symbolicated})
+
 
 def symbolicate_hang_with_mapping(joined):
     hang, symbol_map = joined[1]
     return process_hang_key(hang, symbol_map)
 
+
 def symbolicate_hang_keys(hangs, processed_modules):
     hangs_by_id = hangs.zipWithUniqueId().map(lambda x: (x[1], x[0]))
     hang_ids_by_frame = hangs_by_id.flatMap(get_frames_with_hang_id)
-    symbolication_maps_by_hang_id = (hang_ids_by_frame.leftOuterJoin(processed_modules)
-                                     .map(get_symbolication_mapping_by_hang_id)
-                                     .reduceByKey(shallow_merge))
-    return hangs_by_id.join(symbolication_maps_by_hang_id).map(symbolicate_hang_with_mapping)
+
+    # NOTE: this is the logic that we replaced with Dataframes
+    # symbolication_maps_by_hang_id = (hang_ids_by_frame.leftOuterJoin(processed_modules)
+    #                                  .map(get_symbolication_mapping_by_hang_id)
+    #                                  .reduceByKey(shallow_merge))
+    # return hangs_by_id.join(symbolication_maps_by_hang_id).map(symbolicate_hang_with_mapping)
+
+    def get_hang_id_by_frame_row(hang_id_by_frame):
+        frame, hang_id = hang_id_by_frame
+        return Row(module_to_string(frame[0]), frame[1], hang_id)
+
+    hibf_cols = ['module', 'offset', 'hang_id']
+    hibf_df = hang_ids_by_frame.map(get_hang_id_by_frame_row).toDF(hibf_cols)
+
+    def get_processed_modules_row(processed_module):
+        (module, offset), (symbol, module_name) = processed_module
+        return Row(module_to_string(module), offset, symbol, module_name)
+
+    pm_cols = ['module', 'offset', 'symbol', 'module_name']
+    pm_df = processed_modules.map(get_processed_modules_row).toDF(pm_cols)
+
+    smbhid_df = hibf_df.join(pm_df, on=['module', 'offset'], how='left_outer')
+    symbol_mapping_array = array('module', 'offset', 'symbol', 'module_name')
+    symbol_mappings_df = (smbhid_df.select('hang_id', symbol_mapping_array.alias('symbol_mapping'))
+                          .groupBy('hang_id')
+                          .agg(collect_list('symbol_mapping').alias('symbol_mappings')))
+
+    def get_symbol_mapping(row):
+        # creates a tuple of (unsymbolicated, symbolicated) for each item in row.symbol_mappings
+        mappings = tuple(((string_to_module(mapping[0]), mapping[1]), (mapping[2], mapping[3]))
+                         for mapping in row.symbol_mappings)
+        return (row.hang_id, mappings)
+
+    mappings = symbol_mappings_df.rdd.map(get_symbol_mapping)
+    result = hangs_by_id.join(mappings).map(symbolicate_hang_with_mapping)
+    print "RDD count: {}".format(result.count())
+    return result
+
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
     reduced = (hangs
@@ -253,18 +325,22 @@ def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, c
         k + v for k, v in items if k is not None
     ]
 
+
 def get_usage_hours(ping):
     build_date = ping["application/buildId"][:8] # "YYYYMMDD" : 8 characters
     usage_hours = float(ping["payload/timeSinceLastPing"]) / 3600000.0
     return (build_date, usage_hours)
 
+
 def merge_usage_hours(a, b):
     return a + b
+
 
 def get_usage_hours_by_date(pings):
     return (pings.map(get_usage_hours)
             .reduceByKey(merge_usage_hours)
             .collectAsMap())
+
 
 def make_sym_map(data):
     public_symbols = {}
@@ -293,6 +369,7 @@ def make_sym_map(data):
 
     return sorted(sym_map), sym_map
 
+
 def get_file_URL(module, config):
     lib_name, breakpad_id = module
     if lib_name is None or breakpad_id is None:
@@ -313,6 +390,7 @@ def get_file_URL(module, config):
         # any of these values (lib_name, breakpad_id, file_name) would
         # have unicode strings, or if this is just bad pings.
         return None
+
 
 def process_module(module, offsets, config):
     result = []
@@ -344,8 +422,10 @@ def process_module(module, offsets, config):
             result.append(((module, offset), (UNSYMBOLICATED, module_name)))
     return result
 
+
 def process_modules(frames_by_module, config):
     return frames_by_module.flatMap(lambda x: process_module(x[0], x[1], config))
+
 
 def map_to_histogram(hang):
     #pylint: disable=unused-variable
@@ -359,13 +439,16 @@ def map_to_histogram(hang):
     hist[bucket] = 1
     return ((component, thread, category, build_date), hist)
 
+
 def reduce_histograms(a, b):
     return [a_bucket + b_bucket for a_bucket, b_bucket in zip(a, b)]
+
 
 def get_histograms_by_date_thread_category(filtered):
     return (filtered.map(map_to_histogram)
             .reduceByKey(reduce_histograms)
             .collectAsMap())
+
 
 def count_hangs_in_pings(_, pings, config):
     filtered = time_code("Filtering to valid pings",
@@ -414,6 +497,7 @@ def count_hangs_in_pings(_, pings, config):
 
     return [(title, data) for title, data in histograms_by_component.iteritems()]
 
+
 def transform_pings(_, pings, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
@@ -435,6 +519,7 @@ def transform_pings(_, pings, config):
                                                            processed_modules,
                                                            usage_hours_by_date, config))
     return result, usage_hours_by_date
+
 
 def fetch_URL(url):
     result = False, ""
@@ -465,6 +550,7 @@ def fetch_URL(url):
 
     return result
 
+
 def decode_response(response):
     headers = response.info()
     content_encoding = headers.get("Content-Encoding", "").lower()
@@ -479,6 +565,7 @@ def decode_response(response):
                 #pylint: disable=no-member
                 return data_stream.read().decode('zlib')
     return response.read()
+
 
 def read_file(name, config):
     end_date = datetime.today()
@@ -499,6 +586,7 @@ def read_file(name, config):
         gzfilename = filename + '.gz'
         with gzip.open(gzfilename, 'r') as f:
             return json.loads(f.read())
+
 
 def write_file(name, stuff, config):
     end_date = datetime.today()
@@ -569,6 +657,7 @@ def print_progress(job_start, iterations, current_iteration,
     remaining = projected - job_elapsed
     print "Job should finish in {}".format(timedelta(seconds=remaining))
 
+
 def etl_job(sc, _, config=None):
     """This is the function that will be executed on the cluster"""
 
@@ -607,6 +696,7 @@ def etl_job(sc, _, config=None):
     profile = profile_processor.process_into_profile()
     write_file(final_config['hang_profile_out_filename'], profile, final_config)
 
+
 def etl_job_tracked_stats(sc, _, config=None):
     final_config = {}
     final_config.update(default_config)
@@ -632,6 +722,7 @@ def etl_job_tracked_stats(sc, _, config=None):
         histograms.append(entry)
 
     write_file(final_config['hang_profile_out_filename'], histograms, final_config)
+
 
 def etl_job_incremental_write(sc, _, config=None):
     final_config = {}
@@ -664,6 +755,7 @@ def etl_job_incremental_write(sc, _, config=None):
                    profile, final_config)
         gc.collect()
         print_progress(job_start, iterations, x, iteration_start, date_str)
+
 
 def etl_job_incremental_finalize(_, __, config=None):
     final_config = {}
