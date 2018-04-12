@@ -157,7 +157,7 @@ def process_hangs(ping):
         return []
 
     return [(
-        [process_frame(frame, modules) for frame in h['stack']],
+        [process_frame(frame, modules) for frame in h['stack'] if not isinstance(frame, list) or len(frame) == 2],
         h['duration'],
         h['thread'],
         h['runnableName'],
