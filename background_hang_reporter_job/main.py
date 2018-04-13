@@ -294,10 +294,14 @@ def symbolicate_hang_keys(hangs, processed_modules):
     pm_df = processed_modules.map(get_processed_modules_row).toDF(pm_cols)
 
     smbhid_df = hibf_df.join(pm_df, on=['module', 'offset'], how='left_outer')
+
+    print "DF count: {}".format(smbhid_df.rdd.count())
+
     symbol_mapping_array = array('module', 'offset', 'symbol', 'module_name')
     symbol_mappings_df = (smbhid_df.select('hang_id', symbol_mapping_array.alias('symbol_mapping'))
                           .groupBy('hang_id')
                           .agg(collect_list('symbol_mapping').alias('symbol_mappings')))
+    print "DF count: {}".format(symbol_mappings_df.rdd.count())
 
     def get_symbol_mapping(row):
         # creates a tuple of (unsymbolicated, symbolicated) for each item in row.symbol_mappings
@@ -306,9 +310,10 @@ def symbolicate_hang_keys(hangs, processed_modules):
         return (row.hang_id, mappings)
 
     mappings = symbol_mappings_df.rdd.map(get_symbol_mapping)
-    result = hangs_by_id.join(mappings).map(symbolicate_hang_with_mapping)
+    result = hangs_by_id.join(mappings)
+
     print "RDD count: {}".format(result.count())
-    return result
+    return result.map(symbolicate_hang_with_mapping)
 
 
 def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
