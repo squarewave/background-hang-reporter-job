@@ -265,7 +265,7 @@ def get_symbolication_mapping_by_hang_id(joined):
 
 
 def symbolicate_hang_with_mapping(joined):
-    hang, symbol_map = joined[1]
+    hang, symbol_map = joined
     return process_hang_key(hang, symbol_map)
 
 
@@ -303,16 +303,26 @@ def symbolicate_hang_keys(hangs, processed_modules):
                           .agg(collect_list('symbol_mapping').alias('symbol_mappings')))
     print "DF count: {}".format(symbol_mappings_df.rdd.count())
 
-    def get_symbol_mapping(row):
+    def get_hang_by_id_row(hang_by_id):
+        hang_id, hang = hang_by_id
+        return Row(hang_id, json.dumps(hang, ensure_ascii=False))
+
+    hbi_cols = ['hang_id', 'hang_json']
+    hbi_df = hangs_by_id.map(get_hang_by_id_row).toDF(hbi_cols)
+
+    result_df = hbi_df.join(symbol_mappings_df, on=['hang_id'])
+    print "DF count: {}".format(result_df.rdd.count())
+
+    def get_result_obj_from_row(row):
         # creates a tuple of (unsymbolicated, symbolicated) for each item in row.symbol_mappings
         mappings = tuple(((string_to_module(mapping[0]), mapping[1]), (mapping[2], mapping[3]))
                          for mapping in row.symbol_mappings)
-        return (row.hang_id, mappings)
+        hang = json.loads(row.hang_json)
+        return hang, mappings
 
-    mappings = symbol_mappings_df.rdd.map(get_symbol_mapping)
-    result = hangs_by_id.join(mappings)
-
+    result = result_df.rdd.map(get_result_obj_from_row)
     print "RDD count: {}".format(result.count())
+
     return result.map(symbolicate_hang_with_mapping)
 
 
