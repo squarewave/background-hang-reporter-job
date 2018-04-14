@@ -193,7 +193,7 @@ def symbolicate_stacks(stack, processed_modules):
     symbolicated = []
     for module, offset in stack:
         if module is not None:
-            processed = symbol_map.get((module, offset), None)
+            processed = symbol_map.get((tuple(module), offset), None)
             if processed is not None:
                 symbolicated.append(processed)
             else:
@@ -244,7 +244,7 @@ def process_hang_key(key, processed_modules):
     stack = key[0]
     symbolicated = symbolicate_stacks(stack, processed_modules)
 
-    return (symbolicated,) + key[1:]
+    return (symbolicated,) + tuple(key[1:])
 
 
 def process_hang_value(key, val, usage_hours_by_date):
