@@ -294,14 +294,13 @@ def symbolicate_hang_keys(hangs, processed_modules):
     pm_df = processed_modules.map(get_processed_modules_row).toDF(pm_cols)
 
     smbhid_df = hibf_df.join(pm_df, on=['module', 'offset'], how='left_outer')
-
-    print "DF count: {}".format(smbhid_df.rdd.count())
+    debug_print_rdd_count(smbhid_df.rdd)
 
     symbol_mapping_array = array('module', 'offset', 'symbol', 'module_name')
     symbol_mappings_df = (smbhid_df.select('hang_id', symbol_mapping_array.alias('symbol_mapping'))
                           .groupBy('hang_id')
                           .agg(collect_list('symbol_mapping').alias('symbol_mappings')))
-    print "DF count: {}".format(symbol_mappings_df.rdd.count())
+    debug_print_rdd_count(symbol_mappings_df.rdd)
 
     def get_hang_by_id_row(hang_by_id):
         hang_id, hang = hang_by_id
@@ -311,7 +310,7 @@ def symbolicate_hang_keys(hangs, processed_modules):
     hbi_df = hangs_by_id.map(get_hang_by_id_row).toDF(hbi_cols)
 
     result_df = hbi_df.join(symbol_mappings_df, on=['hang_id'])
-    print "DF count: {}".format(result_df.rdd.count())
+    debug_print_rdd_count(result_df.rdd)
 
     def get_result_obj_from_row(row):
         # creates a tuple of (unsymbolicated, symbolicated) for each item in row.symbol_mappings
@@ -321,7 +320,7 @@ def symbolicate_hang_keys(hangs, processed_modules):
         return hang, mappings
 
     result = result_df.rdd.map(get_result_obj_from_row)
-    print "RDD count: {}".format(result.count())
+    debug_print_rdd_count(result)
 
     return result.map(symbolicate_hang_with_mapping)
 
@@ -465,6 +464,12 @@ def get_histograms_by_date_thread_category(filtered):
             .collectAsMap())
 
 
+def debug_print_rdd_count(rdd):
+    #pylint: disable=using-constant-test
+    if False:
+        print "RDD count:{}".format(rdd.count())
+
+
 def count_hangs_in_pings(_, pings, config):
     filtered = time_code("Filtering to valid pings",
                          lambda: pings.filter(ping_is_valid))
@@ -474,22 +479,18 @@ def count_hangs_in_pings(_, pings, config):
 
     frames_by_module = time_code("Getting stacks by module",
                                  lambda: get_frames_by_module(hangs))
-    print "RDD count: {}".format(frames_by_module.count())
+    debug_print_rdd_count(frames_by_module)
 
     processed_modules = time_code("Processing modules",
                                   lambda: process_modules(frames_by_module, config))
-    print "RDD count: {}".format(processed_modules.count())
+    debug_print_rdd_count(processed_modules)
 
     hangs = symbolicate_hang_keys(hangs, processed_modules)
-    print "RDD count: {}".format(hangs.count())
-
-    count = (hangs.map(map_to_histogram)
-             .reduceByKey(reduce_histograms)
-             .count())
-    print "RDD count: {}".format(count)
+    debug_print_rdd_count(hangs)
 
     histograms = time_code("Getting histograms",
                            lambda: get_histograms_by_date_thread_category(hangs))
+    debug_print_rdd_count(histograms)
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
