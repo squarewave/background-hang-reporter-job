@@ -468,7 +468,7 @@ def get_histograms_by_date_thread_category(filtered):
 
 def debug_print_rdd_count(rdd):
     #pylint: disable=using-constant-test
-    if True:
+    if False:
         print "RDD count:{}".format(rdd.count())
 
 
