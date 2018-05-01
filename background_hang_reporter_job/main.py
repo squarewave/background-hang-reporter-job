@@ -55,7 +55,9 @@ def time_code(name, callback):
     return result
 
 
-def get_data(sc, config, date, end_date=None):
+def get_data(sc, sqlContext, config, date, end_date=None):
+    sqlContext.sql("set spark.sql.shuffle.partitions={}".format(sc.defaultParallelism))
+
     if config['TMP_use_crashes']:
         return crashes.get_data(sc, config, date)
 
@@ -165,7 +167,7 @@ def process_hangs(ping):
         h['annotations'],
         build_date,
         platform,
-    ) for h in hangs if len(h['stack']) > 0]
+    ) for h in hangs if len(h['stack']) > 0 and len(h['stack']) < 300]
 
 
 def get_all_hangs(pings):
@@ -674,7 +676,7 @@ def print_progress(job_start, iterations, current_iteration,
     print "Job should finish in {}".format(timedelta(seconds=remaining))
 
 
-def etl_job(sc, _, config=None):
+def etl_job(sc, sqlContext, config=None):
     """This is the function that will be executed on the cluster"""
 
     final_config = {}
@@ -699,7 +701,7 @@ def etl_job(sc, _, config=None):
         iteration_start = time.time()
         current_date = final_config['start_date'] + timedelta(days=x)
         data = time_code("Getting data",
-                         lambda: get_data(sc, final_config, current_date))
+                         lambda: get_data(sc, sqlContext, final_config, current_date))
         if data is None:
             continue
         transformed, usage_hours = transform_pings(sc, data, final_config)
@@ -713,7 +715,7 @@ def etl_job(sc, _, config=None):
     write_file(final_config['hang_profile_out_filename'], profile, final_config)
 
 
-def etl_job_tracked_stats(sc, _, config=None):
+def etl_job_tracked_stats(sc, sqlContext, config=None):
     final_config = {}
     final_config.update(default_config)
     if config is not None:
@@ -725,7 +727,7 @@ def etl_job_tracked_stats(sc, _, config=None):
         final_config['hang_profile_out_filename'] = final_config['hang_profile_in_filename']
 
     data = time_code("Getting data",
-                     lambda: get_data(sc, final_config,
+                     lambda: get_data(sc, sqlContext, final_config,
                                       final_config['start_date'], final_config['end_date']))
     histograms = count_hangs_in_pings(sc, data, final_config)
     existing = read_file(final_config['hang_profile_in_filename'], final_config)
@@ -740,7 +742,7 @@ def etl_job_tracked_stats(sc, _, config=None):
     write_file(final_config['hang_profile_out_filename'], histograms, final_config)
 
 
-def etl_job_incremental_write(sc, _, config=None):
+def etl_job_incremental_write(sc, sqlContext, config=None):
     final_config = {}
     final_config.update(default_config)
 
@@ -760,7 +762,7 @@ def etl_job_incremental_write(sc, _, config=None):
         current_date = final_config['start_date'] + timedelta(days=x)
         date_str = current_date.strftime("%Y%m%d")
         data = time_code("Getting data",
-                         lambda: get_data(sc, final_config, current_date))
+                         lambda: get_data(sc, sqlContext, final_config, current_date))
         if data is None:
             continue
         transformed, usage_hours = transform_pings(sc, data, final_config)
