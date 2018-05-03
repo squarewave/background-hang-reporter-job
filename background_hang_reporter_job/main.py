@@ -195,11 +195,11 @@ def symbolicate_stacks(stack, processed_modules):
     symbolicated = []
     for module, offset in stack:
         if module is not None:
+            debug_name = module[0]
             processed = symbol_map.get((tuple(module), offset), None)
-            if processed is not None:
+            if processed is not None and processed[0] is not None:
                 symbolicated.append(processed)
             else:
-                debug_name = module[0]
                 symbolicated.append((UNSYMBOLICATED, debug_name))
         else:
             symbolicated.append((UNSYMBOLICATED, 'unknown'))
@@ -413,7 +413,7 @@ def process_module(module, offsets, config):
     if module is None or module[0] is None:
         return [((module, offset), (UNSYMBOLICATED, 'unknown')) for offset in offsets]
     if module[0] == 'pseudo':
-        return [((module, offset), (offset, '')) for offset in offsets]
+        return [((module, offset), ('' if offset is None else offset, '')) for offset in offsets]
     file_URL = get_file_URL(module, config)
     module_name = module[0]
     if file_URL:
