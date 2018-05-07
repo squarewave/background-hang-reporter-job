@@ -452,7 +452,7 @@ def map_to_histogram(hang):
     component = get_tracking_component(hang)
     hist = [0] * 8
     if duration < 128:
-        return (build_date, hist)
+        return ((component, thread, category, build_date), hist)
     bucket = min(7, int(duration).bit_length() - 8) # 128 will give a bit length of 8
     hist[bucket] = 1
     return ((component, thread, category, build_date), hist)
