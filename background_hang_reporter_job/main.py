@@ -425,10 +425,12 @@ def process_module(module, offsets, config):
         sorted_keys, sym_map = make_sym_map(response)
 
         for offset in offsets:
-            i = bisect(sorted_keys, int(offset, 16))
-            key = sorted_keys[i - 1] if i else None
-
-            symbol = sym_map.get(key)
+            try:
+                i = bisect(sorted_keys, int(offset, 16))
+                key = sorted_keys[i - 1] if i else None
+                symbol = sym_map.get(key)
+            except UnicodeEncodeError:
+                symbol = None
             if symbol is not None:
                 result.append(((module, offset), (symbol, module_name)))
             else:
