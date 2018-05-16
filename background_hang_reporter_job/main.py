@@ -27,6 +27,7 @@ from background_hang_reporter_job.categories import categorize_stack
 import background_hang_reporter_job.crashes as crashes
 
 UNSYMBOLICATED = "<unsymbolicated>"
+SYMBOL_TRUNCATE_LENGTH = 200
 
 def deep_merge(original, overrides):
     original_copy = original.copy()
@@ -370,7 +371,7 @@ def make_sym_map(data):
                 continue
             address = int(fields[1], 16)
             symbol = fields[3]
-            public_symbols[address] = symbol
+            public_symbols[address] = symbol[:SYMBOL_TRUNCATE_LENGTH]
         elif line.startswith("FUNC "):
             line = line.rstrip()
             fields = line.split(" ", 4)
@@ -378,7 +379,7 @@ def make_sym_map(data):
                 continue
             address = int(fields[1], 16)
             symbol = fields[4]
-            func_symbols[address] = symbol
+            func_symbols[address] = symbol[:SYMBOL_TRUNCATE_LENGTH]
     # Prioritize PUBLIC symbols over FUNC ones
     sym_map = func_symbols
     sym_map.update(public_symbols)
@@ -470,7 +471,7 @@ def get_histograms_by_date_thread_category(filtered):
 
 def debug_print_rdd_count(rdd):
     #pylint: disable=using-constant-test
-    if False:
+    if True:
         print "RDD count:{}".format(rdd.count())
 
 
