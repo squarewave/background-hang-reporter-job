@@ -328,14 +328,14 @@ def symbolicate_hang_keys(hangs, processed_modules):
     return result.map(symbolicate_hang_with_mapping)
 
 
-def get_grouped_sums_and_counts(hangs, processed_modules, usage_hours_by_date, config):
+def get_grouped_sums_and_counts(hangs, usage_hours_by_date, config):
     reduced = (hangs
                .map(lambda hang: map_to_hang_data(hang, config))
                .filter(lambda hang: hang is not None)
                .reduceByKey(merge_hang_data)
                .collect())
     items = [
-        (process_hang_key(k, processed_modules), process_hang_value(k, v, usage_hours_by_date))
+        (k, process_hang_value(k, v, usage_hours_by_date))
         for k, v in reduced
     ]
     return [
@@ -532,12 +532,13 @@ def transform_pings(_, pings, config):
     processed_modules = time_code("Processing modules",
                                   lambda: process_modules(frames_by_module, config))
 
+    hangs = symbolicate_hang_keys(hangs, processed_modules)
+
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
 
     result = time_code("Grouping stacks",
                        lambda: get_grouped_sums_and_counts(hangs,
-                                                           processed_modules,
                                                            usage_hours_by_date, config))
     return result, usage_hours_by_date
 
