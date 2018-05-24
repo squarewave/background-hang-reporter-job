@@ -495,7 +495,6 @@ def count_hangs_in_pings(_, pings, config):
 
     histograms = time_code("Getting histograms",
                            lambda: get_histograms_by_date_thread_category(hangs))
-    debug_print_rdd_count(histograms)
 
     usage_hours_by_date = time_code("Getting usage hours",
                                     lambda: get_usage_hours_by_date(filtered))
