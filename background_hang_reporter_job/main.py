@@ -367,18 +367,26 @@ def make_sym_map(data):
         if line.startswith("PUBLIC "):
             line = line.rstrip()
             fields = line.split(" ", 3)
-            if len(fields) < 4:
-                continue
-            address = int(fields[1], 16)
-            symbol = fields[3]
+            m_offset = 0
+            if fields[1] == "m":
+                m_offset = 1
+                fields = line.split(" ", 4)
+            if len(fields) < 4 + m_offset:
+                raise ValueError("Failed to parse address - line: {}".format(line))
+            address = int(fields[1 + m_offset], 16)
+            symbol = fields[3 + m_offset]
             public_symbols[address] = symbol[:SYMBOL_TRUNCATE_LENGTH]
         elif line.startswith("FUNC "):
             line = line.rstrip()
             fields = line.split(" ", 4)
-            if len(fields) < 5:
-                continue
-            address = int(fields[1], 16)
-            symbol = fields[4]
+            m_offset = 0
+            if fields[1] == "m":
+                m_offset = 1
+                fields = line.split(" ", 5)
+            if len(fields) < 5 + m_offset:
+                raise ValueError("Failed to parse address - line: {}".format(line))
+            address = int(fields[1 + m_offset], 16)
+            symbol = fields[4 + m_offset]
             func_symbols[address] = symbol[:SYMBOL_TRUNCATE_LENGTH]
     # Prioritize PUBLIC symbols over FUNC ones
     sym_map = func_symbols
@@ -431,6 +439,8 @@ def process_module(module, offsets, config):
                 key = sorted_keys[i - 1] if i else None
                 symbol = sym_map.get(key)
             except UnicodeEncodeError:
+                symbol = None
+            except ValueError:
                 symbol = None
             if symbol is not None:
                 result.append(((module, offset), (symbol, module_name)))
