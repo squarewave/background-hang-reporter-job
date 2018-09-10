@@ -210,17 +210,32 @@ def symbolicate_stacks(stack, processed_modules):
 def map_to_hang_data(hang, config):
     #pylint: disable=unused-variable
     stack, duration, thread, runnable_name, process, annotations, build_date, platform = hang
+    result = []
     if duration < config['hang_lower_bound']:
-        return None
+        return result
     if duration >= config['hang_upper_bound']:
-        return None
+        return result
 
     if 'ExternalCPUHigh' in annotations:
-        return None
+        return result
 
     pending_input = False
     if 'PendingInput' in annotations:
         pending_input = True
+
+    if 'PaintWhileInterruptingJS' in annotations:
+        key = (
+            tuple((a, b) for a, b in stack),
+            runnable_name,
+            'Gecko_Child_ForcePaint',
+            build_date,
+            pending_input,
+            platform)
+
+        result.append((key, (
+            float(duration),
+            1.0,
+        )))
 
     key = (
         tuple((a, b) for a, b in stack),
@@ -230,10 +245,12 @@ def map_to_hang_data(hang, config):
         pending_input,
         platform)
 
-    return (key, (
+    result.append((key, (
         float(duration),
         1.0,
-    ))
+    )))
+
+    return result
 
 
 def merge_hang_data(a, b):
@@ -330,8 +347,7 @@ def symbolicate_hang_keys(hangs, processed_modules):
 
 def get_grouped_sums_and_counts(hangs, usage_hours_by_date, config):
     reduced = (hangs
-               .map(lambda hang: map_to_hang_data(hang, config))
-               .filter(lambda hang: hang is not None)
+               .flatMap(lambda hang: map_to_hang_data(hang, config))
                .reduceByKey(merge_hang_data)
                .collect())
     items = [
