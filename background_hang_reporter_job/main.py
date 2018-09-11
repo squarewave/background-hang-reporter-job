@@ -2,6 +2,7 @@
 import contextlib
 import gc
 import gzip
+import json
 import os
 import time
 import urllib
@@ -15,7 +16,6 @@ from pyspark.sql.types import Row
 #pylint: disable=import-error
 from pyspark.sql.functions import array, collect_list
 
-import ujson as json
 import boto3
 from boto3.s3.transfer import S3Transfer
 from moztelemetry import get_pings_properties

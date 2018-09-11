@@ -12,7 +12,6 @@ setup(name='background_hang_reporter_job',
       packages=find_packages(exclude=['tests']),
       install_requires=[
         'eventlet',
-        'ujson',
         'pandas',
         'python_moztelemetry',
       ]
