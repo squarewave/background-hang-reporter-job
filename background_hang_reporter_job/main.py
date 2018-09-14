@@ -159,7 +159,7 @@ def process_hangs(ping):
     if hangs is None:
         return []
 
-    return [(
+    pre_result = [(
         [process_frame(frame, modules) for frame in h['stack'] if not isinstance(frame, list) or len(frame) == 2],
         h['duration'],
         h['thread'],
@@ -170,6 +170,32 @@ def process_hangs(ping):
         platform,
     ) for h in hangs if len(h['stack']) > 0 and len(h['stack']) < 300]
 
+    result = []
+    for stack, duration, thread, runnable_name, process, annotations, build_date, platform in pre_result:
+        result.append((
+            stack,
+            duration,
+            thread,
+            runnable_name,
+            process,
+            annotations,
+            build_date,
+            platform,
+        ))
+
+        if 'PaintWhileInterruptingJS' in annotations:
+            result.append((
+                stack,
+                duration,
+                'Gecko_Child_ForcePaint',
+                runnable_name,
+                process,
+                annotations,
+                build_date,
+                platform,
+            ))
+
+    return result
 
 def get_all_hangs(pings):
     return pings.flatMap(process_hangs)
@@ -222,20 +248,6 @@ def map_to_hang_data(hang, config):
     pending_input = False
     if 'PendingInput' in annotations:
         pending_input = True
-
-    if 'PaintWhileInterruptingJS' in annotations:
-        key = (
-            tuple((a, b) for a, b in stack),
-            runnable_name,
-            'Gecko_Child_ForcePaint',
-            build_date,
-            pending_input,
-            platform)
-
-        result.append((key, (
-            float(duration),
-            1.0,
-        )))
 
     key = (
         tuple((a, b) for a, b in stack),
